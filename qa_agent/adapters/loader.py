@@ -10,6 +10,15 @@ def load_adapter(project_type: str):
     """
     动态加载 Adapter
     """
+    # 类型别名规范化
+    type_map = {
+        'webapp': 'web',
+        'frontend': 'web',
+        'api': 'backend',
+        'server': 'backend',
+    }
+    project_type = type_map.get(project_type, project_type)
+
     if project_type == 'web':
         from .web import WebAdapter
         return WebAdapter()
