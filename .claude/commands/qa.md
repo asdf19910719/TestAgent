@@ -255,6 +255,19 @@ python -m qa_agent.cli.main resolve-bugfix --ref "$ref"
 
 L3 是发版门，**必须覆盖项目全部功能的全部路径**（正常 + 异常 + 边界 + 状态转换）。
 
+**执行前先检查基线**：
+```bash
+python -c "
+from qa_agent.core.state_manager import StateManager
+sm = StateManager()
+baseline = sm.load_baseline()
+if baseline:
+    print(f'已有基线: {baseline[\"total_cases\"]} 条用例 (建立于 {baseline[\"established_at\"]})')
+else:
+    print('首次 L3，将建立基线')
+"
+```
+
 1. **用例库为空或极少（< 10 条）时**：
    - **不能**只看 git diff 生成增量用例
    - **必须**基于需求文档 + 源码结构做**完整覆盖**
@@ -267,6 +280,21 @@ L3 是发版门，**必须覆盖项目全部功能的全部路径**（正常 + �
         - 状态转换：生命周期、多步操作的中间态（2-4 条）
         - 集成/E2E：完整用户操作流程（2-3 条）
      d) 确保需求追踪矩阵 100% 覆盖
+     e) **生成覆盖矩阵**（模块 × 维度，输出到 qa/coverage_matrix.md）
+     f) **执行完成后建立基线**：
+        ```python
+        from qa_agent.core.state_manager import StateManager
+        from datetime import datetime
+        sm = StateManager()
+        sm.save_baseline({
+            'established_at': datetime.now().isoformat(),
+            'established_by': '<run_id>',
+            'total_cases': <用例总数>,
+            'by_module': {<模块名>: <该模块用例数>, ...},
+            'coverage_matrix': {<模块>: [<已覆盖维度>, ...], ...},
+            'target_coverage': '主流程全覆盖 + 异常/边界 + 容错'
+        })
+        ```
    
    **用例数量不设固定上限，由模块复杂度决定**：
    - 简单模块（静态页面、配置页）：2-5 条
@@ -276,10 +304,16 @@ L3 是发版门，**必须覆盖项目全部功能的全部路径**（正常 + �
    **参考基准**：`用例总数 ≈ 模块数 × 平均每模块 12-15 条`
 
 2. **用例库已有足够用例时**：
-   - 验证现有用例是否覆盖所有需求
-   - 补充缺失的用例（新功能/未覆盖的需求点）
-   - 执行全部用例（不限数量，mode_limits.L3 = -1）
-   - **不重新生成已有的用例**
+   - **先检查基线是否需要刷新**（30 天/需求重大变更）
+   - 如果基线仍有效：
+     a) 对照基线的覆盖矩阵，只补充缺失的维度
+     b) 不重新生成已有用例
+     c) 执行全部用例（不限数量）
+   - 如果需要刷新基线：
+     a) 重新扫描需求文档和源码结构
+     b) 补充新增功能模块的用例
+     c) 更新覆盖矩阵
+     d) 保存新基线
 
 3. **影响面分析**：
    - L3 的影响面 = **全部用例**（不限 git diff 范围）

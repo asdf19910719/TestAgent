@@ -18,6 +18,8 @@ class StateManager:
         self.qa_dir = Path(qa_dir)
         self.run_dir = self.qa_dir / "run"
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.history_path = self.run_dir / "history.jsonl"  # 历史记录（追加模式）
+        self.baseline_path = self.run_dir / "baseline.json"  # 用例规模基线
 
     def save_last_run(
         self,
@@ -206,3 +208,70 @@ class StateManager:
         计算 checksum
         """
         return hashlib.sha256(run_id.encode()).hexdigest()[:16]
+
+    def append_to_history(self, run_summary: Dict[str, Any]) -> None:
+        """
+        追加一条执行记录到 history.jsonl
+
+        run_summary 包含：
+        - run_id / mode / scope / timestamp
+        - selection: {total, by_level, by_priority}
+        - result: {total, pass, fail, skip, duration}
+        - gatekeeper_verdict
+        """
+        with open(self.history_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(run_summary, ensure_ascii=False) + '\n')
+
+    def load_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        加载最近 N 条历史记录
+        """
+        if not self.history_path.exists():
+            return []
+
+        lines = self.history_path.read_text(encoding='utf-8').strip().split('\n')
+        return [json.loads(line) for line in lines[-limit:] if line]
+
+    def save_baseline(self, baseline: Dict[str, Any]) -> None:
+        """
+        保存用例规模基线（第一次 L3 完成后）
+
+        baseline 包含：
+        - established_at: 建立时间
+        - established_by: 建立时的 run_id
+        - total_cases: 基线用例总数
+        - by_module: {module_name: case_count}
+        - coverage_matrix: {module: [dimension1, dimension2, ...]}
+        - target_coverage: 预期覆盖标准
+        """
+        self._atomic_write_json(self.baseline_path, baseline)
+
+    def load_baseline(self) -> Optional[Dict[str, Any]]:
+        """
+        加载基线
+        """
+        if not self.baseline_path.exists():
+            return None
+
+        with open(self.baseline_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    def needs_baseline_refresh(self) -> bool:
+        """
+        判断是否需要刷新基线
+
+        触发条件：
+        - 基线不存在
+        - 基线建立时间超过 30 天
+        - 需求文档有重大更新（通过 git diff 判断）
+        """
+        baseline = self.load_baseline()
+        if not baseline:
+            return True
+
+        # 检查时效性（30 天）
+        established = datetime.fromisoformat(baseline['established_at'])
+        if datetime.now() - established > timedelta(days=30):
+            return True
+
+        return False
