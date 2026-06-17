@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from ..core.types import ProjectFingerprint, TestCase, RunResult
+from ...core.types import ProjectFingerprint, TestCase, RunResult
 
 
 class GenericAdapter:
@@ -162,7 +162,7 @@ class GenericAdapter:
         """
         执行单条测试命令并解析输出
         """
-        from ..core.report_parser import TapReportParser, PytestReportParser
+        from ...core.report_parser import TapReportParser, PytestReportParser
 
         # Windows 兼容：用 shell=True 处理复合命令
         print(f"[GenericAdapter] 执行: {cmd_str}")
@@ -218,7 +218,7 @@ class GenericAdapter:
         """
         多格式输出解析（启发式）
         """
-        from ..core.report_parser import TapReportParser, PytestReportParser
+        from ...core.report_parser import TapReportParser, PytestReportParser
 
         # 1. 尝试 TAP
         if 'ok ' in output and ('1..' in output or 'not ok ' in output):

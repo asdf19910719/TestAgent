@@ -66,20 +66,28 @@ class TestIntegration:
 
     def _setup_test_repo(self, path: Path):
         """设置测试仓库"""
-        # 初始化 git
+        # 初始化 git（修复 Windows + Python 3.14 subprocess 句柄问题）
         import subprocess
-        subprocess.run(['git', 'init'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, capture_output=True)
+        kwargs = dict(
+            cwd=path,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        subprocess.run(['git', 'init'], **kwargs)
+        subprocess.run(['git', 'config', 'user.name', 'Test'], **kwargs)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'], **kwargs)
 
         # 创建初始文件
         (path / 'src').mkdir()
         (path / 'src' / 'test.py').write_text('def test(): pass\n')
-        subprocess.run(['git', 'add', '.'], cwd=path, capture_output=True)
-        subprocess.run(['git', 'commit', '-m', 'init'], cwd=path, capture_output=True)
+        subprocess.run(['git', 'add', '.'], **kwargs)
+        subprocess.run(['git', 'commit', '-m', 'init'], **kwargs)
 
-        # 创建变更
+        # 创建变更并 commit（确保 HEAD~1 有效）
         (path / 'src' / 'test.py').write_text('def test(): return True\n')
+        subprocess.run(['git', 'add', '.'], **kwargs)
+        subprocess.run(['git', 'commit', '-m', 'change'], **kwargs)
 
         # 创建 qa 目录
         (path / 'qa' / 'cases').mkdir(parents=True)

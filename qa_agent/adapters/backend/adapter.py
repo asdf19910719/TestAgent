@@ -5,7 +5,7 @@ Backend Adapter: Python/Go/Rust 后端项目适配器
 from pathlib import Path
 from typing import Dict, Any, List
 
-from ..core.types import ProjectFingerprint, TestCase, RunResult
+from ...core.types import ProjectFingerprint, TestCase, RunResult
 
 
 class BackendAdapter:
@@ -108,7 +108,7 @@ def test_{case.id.lower()}():
         """调用 pytest 执行测试"""
         import subprocess
         import tempfile
-        from ..core.report_parser import PytestReportParser
+        from ...core.report_parser import PytestReportParser
 
         # 收集测试文件
         test_files = list(set(c.automation.get('file') for c in cases if c.automation.get('file')))
@@ -161,7 +161,7 @@ def test_{case.id.lower()}():
     def _run_go_test(self, cases: List[TestCase], mode: str) -> RunResult:
         """调用 go test"""
         import subprocess
-        from ..core.report_parser import TapReportParser
+        from ...core.report_parser import TapReportParser
 
         cmd = ['go', 'test', '-v', './...']
         print(f"[BackendAdapter] 执行: {' '.join(cmd)}")

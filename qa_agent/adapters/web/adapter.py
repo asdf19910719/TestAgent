@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from ..core.types import ProjectFingerprint, TestCase, RunResult
+from ...core.types import ProjectFingerprint, TestCase, RunResult
 
 
 class WebAdapter:
@@ -216,7 +216,7 @@ test('{case.id}: {case.title}', async ({{ page }}) => {{
     def _run_vitest(self, cases: List[TestCase]) -> Dict[str, Any]:
         """调用 vitest 执行单元/集成测试"""
         import subprocess
-        from ..core.report_parser import VitestReportParser
+        from ...core.report_parser import VitestReportParser
 
         # 收集测试文件
         test_files = list(set(c.automation.get('file') for c in cases if c.automation.get('file')))
@@ -244,7 +244,7 @@ test('{case.id}: {case.title}', async ({{ page }}) => {{
     def _run_playwright(self, cases: List[TestCase]) -> Dict[str, Any]:
         """调用 playwright 执行 E2E 测试"""
         import subprocess
-        from ..core.report_parser import PlaywrightReportParser
+        from ...core.report_parser import PlaywrightReportParser
 
         test_files = list(set(c.automation.get('file') for c in cases if c.automation.get('file')))
 

@@ -15,6 +15,14 @@ import sys
 import click
 from pathlib import Path
 
+# Windows GBK 终端兼容：强制 stdout 用 UTF-8
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
+
 from ..core.types import Mode
 from ..core.engine import Engine
 from ..core.init_wizard import InitWizard

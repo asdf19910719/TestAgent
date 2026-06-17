@@ -14,7 +14,11 @@ class ImpactAnalyzer:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.mode = config.get('impact_analysis', 'gitnexus')
+
+    @property
+    def mode(self) -> str:
+        """动态读取 impact_analysis 模式（支持运行时覆盖）"""
+        return self.config.get('impact_analysis', 'gitnexus')
 
     def analyze(
         self,
