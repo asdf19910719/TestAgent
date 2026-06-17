@@ -189,6 +189,7 @@ class ImpactAnalyzer:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            encoding='utf-8',
             text=True,
             check=True
         )
@@ -203,6 +204,7 @@ class ImpactAnalyzer:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            encoding='utf-8',
             text=True,
             check=True
         )
