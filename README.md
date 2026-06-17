@@ -73,7 +73,54 @@ poetry install
 pip install -e .
 ```
 
+## 快速开始
+
+### 一键安装（推荐）
+
+**Windows PowerShell**：
+```powershell
+cd E:\AIProject\TestAgent
+.\install.ps1 D:\YourProject
+```
+
+**Linux / macOS / Git Bash**：
+```bash
+cd /path/to/TestAgent
+./install.sh /path/to/YourProject
+```
+
+脚本自动完成：复制 `.claude/` 扩展、安装 Python 包、初始化项目。
+
+### 手动安装
+
+如果一键脚本失败，手动步骤：
+
+**1. 复制扩展**：
+```bash
+cp -r .claude /path/to/your/project/
+```
+
+**2. 安装 Python 包**：
+```bash
+cd TestAgent
+pip install -e .
+```
+
+**3. 初始化项目**：
+```bash
+cd /path/to/your/project
+qa init   # 自动检测项目类型、框架、需求文档，生成 .qa-agent.yml
+```
+
+**4. 检查配置（可选）**：
+```yaml
+# 编辑 .qa-agent.yml 确认自动检测
+# 特别是 gitnexus.mcp_tool_prefixes（本机如用 gitnexus22 可调整）
+```
+
 ### 接入项目
+
+（已由上述步骤完成）
 
 把 `.claude/` 目录复制到你的项目根目录：
 

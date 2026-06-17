@@ -110,18 +110,22 @@ class ImpactAnalyzer:
         """
         from .gitnexus import get_gitnexus_client
 
-        # 步骤 1: 获取 GitNexus 客户端（使用 .qa-agent.yml 配置的 MCP 工具前缀）
+        # 步骤 1: 获取 GitNexus 客户端（使用 .qa-agent.yml 配置的 MCP 工具前缀列表）
         gitnexus_config = self.config.get('gitnexus', {})
         client = get_gitnexus_client(gitnexus_config)
 
         if not client.check_availability():
+            prefixes_str = ', '.join(client.mcp_tool_prefixes)
             raise RuntimeError(
                 f"GitNexus 不可用\n"
-                f"配置的 MCP 工具: {client.detect_changes_tool}\n"
+                f"配置的 MCP 工具前缀（按优先级）: {prefixes_str}\n"
                 f"请检查：\n"
                 f"  1. MCP 服务是否启动\n"
-                f"  2. .qa-agent.yml 中 gitnexus.mcp_tool_prefix 是否正确（默认 mcp__gitnexus）\n"
-                f"  3. 如本机用 gitnexus22，请配置 gitnexus.mcp_tool_prefix: mcp__gitnexus22"
+                f"  2. .qa-agent.yml 中 gitnexus.mcp_tool_prefixes 是否正确\n"
+                f"     默认: ['mcp__gitnexus', 'mcp__gitnexus22']  # 依次尝试\n"
+                f"  3. 如本机仅用 gitnexus22，配置：\n"
+                f"     gitnexus:\n"
+                f"       mcp_tool_prefixes: ['mcp__gitnexus22']"
             )
 
         # 步骤 2: git diff

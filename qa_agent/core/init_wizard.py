@@ -183,10 +183,10 @@ class InitWizard:
             'impact_analysis': 'gitnexus' if detected['has_git'] else 'local'
         }
 
-        # GitNexus MCP 工具前缀（本机可能用 gitnexus22）
-        # 用户首次接入时会作为草稿出现在 .qa-agent.yml，可手动调整
+        # GitNexus MCP 工具前缀（列表，按优先级尝试）
+        # 用户首次接入时会作为草稿出现在 .qa-agent.yml，可手动调整顺序
         config['gitnexus'] = {
-            'mcp_tool_prefix': 'mcp__gitnexus',  # 本机如用 gitnexus22 改为 mcp__gitnexus22
+            'mcp_tool_prefixes': ['mcp__gitnexus', 'mcp__gitnexus22'],
         }
 
         # Generic 项目需要手动配置测试命令

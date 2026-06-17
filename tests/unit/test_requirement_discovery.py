@@ -107,19 +107,57 @@ class TestRequirementDiscovery:
         assert len(result['all_docs']) == 2
 
     def test_clawbox_style_project(self, tmp_path):
-        """模拟 ClawBoxClient 项目结构"""
+        """模拟 ClawBoxClient 项目结构（工业级 AI 工作流）"""
         # 模拟 D:\AndroidProject\ClawBoxClient 的目录结构
         (tmp_path / 'app').mkdir()
         (tmp_path / 'app' / 'build.gradle').write_text('android { }')
 
         ai_docs = tmp_path / 'ai-docs'
-        ai_docs.mkdir()
-        (ai_docs / '需求文档.md').write_text('# 项目需求')
-        (ai_docs / '技术方案.md').write_text('# 技术设计')
-        (ai_docs / 'API设计.md').write_text('# API')
+        prd_dir = ai_docs / 'prd'
+        arch_dir = ai_docs / 'architecture'
+        api_dir = ai_docs / 'apis'
+
+        prd_dir.mkdir(parents=True)
+        arch_dir.mkdir(parents=True)
+        api_dir.mkdir(parents=True)
+
+        # 汇总文件
+        (prd_dir / 'prd-all.md').write_text('# 全量 PRD')
+        (arch_dir / 'architecture-overview.md').write_text('# 架构概览')
+        (api_dir / 'api-all.md').write_text('# 全量 API')
+
+        # 版本文件
+        (prd_dir / 'v0.1.0-sms-binding.md').write_text('# 短信绑定')
+        (arch_dir / 'baseline-architecture.md').write_text('# 基线架构')
 
         result = discover_requirements({}, cwd=tmp_path)
         assert result['source'] == 'convention'
-        # 应该找到至少一个文档
-        assert result['primary'] or len(result['all_docs']) >= 3
-        assert len(result['all_docs']) >= 3
+
+        # 应该找到汇总文件作为主文档
+        assert result['primary']
+        assert 'prd-all.md' in result['primary']
+
+        # 设计文档也应该是汇总文件
+        assert result['design']
+        assert 'overview' in result['design']
+
+        # API 文档
+        assert result['api']
+        assert 'api-all.md' in result['api']
+
+        # all_docs 包含所有 md
+        assert len(result['all_docs']) >= 5
+
+    def test_aggregate_file_priority(self, tmp_path):
+        """汇总文件优先级测试"""
+        ai_docs = tmp_path / 'ai-docs' / 'prd'
+        ai_docs.mkdir(parents=True)
+
+        # 多个文件，但汇总文件应该优先
+        (ai_docs / 'v0.1.0.md').write_text('# V0.1')
+        (ai_docs / 'v0.2.0.md').write_text('# V0.2')
+        (ai_docs / 'prd-all.md').write_text('# 全量')
+
+        result = discover_requirements({}, cwd=tmp_path)
+        # 应该选中 prd-all.md 而不是第一个版本文件
+        assert 'prd-all' in result['primary']

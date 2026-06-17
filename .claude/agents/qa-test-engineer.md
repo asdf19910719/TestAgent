@@ -117,17 +117,32 @@ python -m qa_agent.cli.main scaffold --case <case_id>
 
 ### GitNexus MCP 工具
 
-影响面分析需要调用 GitNexus MCP 工具。**工具名称由 `.qa-agent.yml` 的 `gitnexus.mcp_tool_prefix` 决定**：
+影响面分析需要调用 GitNexus MCP 工具。**工具名称由 `.qa-agent.yml` 的 `gitnexus.mcp_tool_prefixes` 决定（列表，依次尝试）**：
 
-- 默认前缀：`mcp__gitnexus` → 工具名 `mcp__gitnexus__detect_changes` / `mcp__gitnexus__impact`
-- 本机如配置 `gitnexus22` → 改前缀为 `mcp__gitnexus22` → 工具名 `mcp__gitnexus22__detect_changes` 等
+**默认配置（自动 fallback）**：
+```yaml
+gitnexus:
+  mcp_tool_prefixes: ['mcp__gitnexus', 'mcp__gitnexus22']
+```
 
-**调用前先读取 `.qa-agent.yml`**，确认实际工具名。如果调用失败，提示用户：
+**调用策略**：
+1. 优先尝试 `mcp__gitnexus__detect_changes` / `mcp__gitnexus__impact`
+2. 如失败（工具不存在），自动降级到 `mcp__gitnexus22__detect_changes` / `mcp__gitnexus22__impact`
+3. 如全部失败，提示用户在 `.qa-agent.yml` 配置实际服务名
+
+**自定义优先级**：
+```yaml
+gitnexus:
+  mcp_tool_prefixes: ['mcp__gitnexus22']  # 仅用 gitnexus22，跳过 fallback
+```
+
+**调用前先读取 `.qa-agent.yml`**，确认工具前缀列表。如全部尝试失败，提示：
 
 ```
-mcp__gitnexus__detect_changes 不可用。请在 .qa-agent.yml 配置：
+mcp__gitnexus / mcp__gitnexus22 均不可用。
+请在 .qa-agent.yml 配置本机实际服务名：
   gitnexus:
-    mcp_tool_prefix: mcp__gitnexus22  # 改为本机实际服务名
+    mcp_tool_prefixes: ['mcp__gitnexus_v3']
 ```
 
 ### L1 Feature 流程
