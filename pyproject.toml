@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "qa-agent"
+version = "0.1.0"
+description = "AI Test Engineer Agent v3.0 Solo Edition - 产品级质量 + 个人级流程"
+authors = ["AI Test Engineer Agent Team"]
+readme = "README.md"
+packages = [{include = "qa_agent"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+anthropic = "^0.40.0"
+pyyaml = "^6.0.1"
+gitpython = "^3.1.43"
+click = "^8.1.7"
+jinja2 = "^3.1.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-cov = "^5.0.0"
+black = "^24.0.0"
+mypy = "^1.11.0"
+ruff = "^0.6.0"
+
+[tool.poetry.scripts]
+qa = "qa_agent.cli.main:cli"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
