@@ -1,8 +1,62 @@
 # AI Test Engineer Agent 需求与方案文档
 
-> 版本：v3.0-rev1 Solo Edition
+> 版本：v3.0-rev2 Solo Edition
 > 修订日期：2026-06-17
 > 文档定位：面向**个人开发者**的产品级测试 Agent 规范
+> **架构定位**：Claude Code 扩展（不需要 Anthropic API key）
+
+## 0. v3.0-rev2 关键修订（架构纠偏）
+
+**v3.0-rev1 → v3.0-rev2 的根本性变化**：
+
+| 维度 | rev1 错误方向 | rev2 正确方向 |
+|---|---|---|
+| LLM 调用方 | Python + anthropic SDK | Claude Code（slash command + subagent）|
+| API key | 需要单独配置 | 不需要 |
+| 用户入口 | `qa feature ...`（终端）| `/qa feature ...`（Claude Code）|
+| 月成本 | $20-100 | $0（Claude Code 订阅已含）|
+| Designer/Gatekeeper | Python 类内调用 LLM | `.claude/agents/*.md` subagent |
+| 提示词位置 | `prompts/*.txt` | subagent 定义文件内 |
+
+### 新架构
+
+```
+Claude Code（用户 LLM 入口）
+   ↓ /qa feature 登录
+.claude/commands/qa.md（slash command）
+   ↓ Task tool 委派
+├── .claude/agents/qa-test-engineer.md（Designer+Runner）
+└── .claude/agents/qa-gatekeeper.md（Gatekeeper，独立上下文）
+   ↓ Bash 调用
+qa_agent/ Python 工具层（机械工作，不调 LLM）
+   ↓ subprocess
+测试框架（Playwright/Vitest/pytest 等）
+```
+
+### Python 工具层职责变化
+
+不再"自己调 LLM"，改为"提供机械工作 + 输出结构化任务"：
+
+* **DesignerRunner**：加载/保存用例库、调用 Adapter 真实执行、收集失败、持久化
+* **Gatekeeper**：算法判定（L0/L4 足够）+ 报告框架；L1-L3 标记 `needs_subagent_review` 由 subagent 接管
+* **CLI 新增 subagent 子命令**：`prepare` / `scaffold` / `execute` / `judge` / `resolve-bugfix`，供 subagent 通过 Bash 调用
+
+### 文件结构
+
+新增：
+- `.claude/commands/qa.md` - 用户入口 slash command
+- `.claude/agents/qa-test-engineer.md` - Designer+Runner subagent
+- `.claude/agents/qa-gatekeeper.md` - Gatekeeper subagent（独立上下文）
+
+删除：
+- `anthropic` SDK 依赖（pyproject.toml）
+- `jinja2` 依赖（提示词不再渲染模板）
+- `prompts/*.txt`（提示词移到 subagent 定义文件内）
+
+> 后文（§1 起）保留 v3.0-rev1 的所有约束、红线、模式定义、影响面算法等内容。
+> rev2 是**架构纠偏**，不是规范变更——所有质量保证机制原样保留。
+
+---
 > 质量目标：产品级（经过测试和验收的质量）
 > 流程目标：个人级（最小化仪式，最大化价值）
 

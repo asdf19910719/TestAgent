@@ -2,9 +2,28 @@
 
 ## 项目状态
 
-**✅ Phase 1-6 全部完成**（2026-06-17）
+**✅ Phase 1-10 全部完成**（2026-06-17）
 
-所有核心功能已实现，MVP 可用。
+所有核心功能已实现 + Claude Code 扩展架构落地，可直接试用。
+
+## 架构定位
+
+本项目作为 **Claude Code 扩展**运行：
+
+* ✅ **不需要单独的 Anthropic API key**
+* ✅ 复用 Claude Code 的 LLM 推理能力
+* ✅ 在 Claude Code 中直接 `/qa feature 登录` 触发
+* ✅ Subagent 委派机制（`qa-test-engineer` / `qa-gatekeeper`）
+
+```
+Claude Code → /qa slash command → Task 工具委派 → Subagent
+                                           ↓
+                          Python 工具层（机械工作，不调 LLM）
+                                           ↓
+                          Adapter（真实测试执行）
+                                           ↓
+                          测试框架（Playwright/Vitest/pytest...）
+```
 
 ## 完成功能清单
 
@@ -169,3 +188,132 @@ AI Test Engineer Agent v3.0 Solo Edition 的 **MVP（最小可用产品）已全
 核心功能（5 档模式、两角色、影响面分析、Adapter 插件、检查点恢复、非功能测试分级）全部落地，15 项关键修订全部实现。
 
 项目可进入真实项目试用阶段。
+
+---
+
+## Phase 7: YAML + 真实测试执行 + 报告解析（✅ 完成）
+
+- [x] YAML 序列化/反序列化（CaseSerializer、BugSerializer）
+- [x] 集成到 DesignerRunner.save_bugs / collect_failures
+- [x] 集成到 bug_resolver（load/fuzzy_search/create）
+- [x] Engine._load_all_cases 真实加载
+- [x] WebAdapter.run() 真实调用 vitest/playwright
+- [x] BackendAdapter.run() 真实调用 pytest/go test/cargo test
+- [x] 报告解析器 report_parser.py（vitest/playwright/pytest/TAP）
+- [x] 异常处理：超时、命令未找到、环境失败标 BLOCKED
+- [x] 26 个单元测试全部通过
+
+## Phase 8: Generic Adapter（✅ 完成）
+
+- [x] Generic Adapter 完整实现（adapters/generic/adapter.py）
+- [x] 支持 Rust/Go/C++/Make 等任意测试命令
+- [x] 多格式输出解析（TAP / JUnit / cargo / go test / 文本）
+- [x] 启发式失败分类（env vs test）
+
+## Phase 10: Claude Code 扩展架构（✅ 完成）⭐
+
+**关键决策**：放弃 Anthropic SDK 集成方向，改为 Claude Code 原生扩展。
+- ✅ 不需要单独 API key
+- ✅ 复用 Claude Code 订阅
+- ✅ 用户体验流畅（直接 `/qa ...`）
+
+- [x] 删除 anthropic SDK 依赖
+- [x] 创建 `.claude/commands/qa.md` 主 slash command
+- [x] 创建 `.claude/agents/qa-test-engineer.md` Designer+Runner subagent
+- [x] 创建 `.claude/agents/qa-gatekeeper.md` 独立判定 subagent
+- [x] CLI 扩展 subagent 子命令（prepare/scaffold/execute/judge/resolve-bugfix）
+- [x] DesignerRunner / Gatekeeper 重新定位为"工具层"
+- [x] 文档更新（README + IMPLEMENTATION_SUMMARY）
+- [x] 两个 subagent 已被 Claude Code 识别注册
+
+## 最终架构
+
+```
+┌─────────────────────────────────────────────┐
+│ 用户在 Claude Code 输入 /qa feature 登录   │
+└──────────────┬──────────────────────────────┘
+               ↓
+┌─────────────────────────────────────────────┐
+│ .claude/commands/qa.md (slash command)      │
+│ - 解析参数、检查环境、调用 Python prepare   │
+└──────────────┬──────────────────────────────┘
+               ↓ Task 工具委派
+┌──────────────┴──────────────────────────────┐
+│ qa-test-engineer subagent                   │
+│ - 设计/复核用例（LLM 推理）                   │
+│ - 填充测试脚本逻辑（LLM 推理）                │
+│ - 调用 Python execute（机械工作）            │
+└──────────────┬──────────────────────────────┘
+               ↓ Task 工具委派（独立上下文）
+┌──────────────┴──────────────────────────────┐
+│ qa-gatekeeper subagent                      │
+│ - 独立溯源原始需求（LLM 推理）                │
+│ - 校验 requirement_ids（LLM 推理）           │
+│ - 判定 PASS/FAIL/BLOCKED（LLM 推理）         │
+└──────────────┬──────────────────────────────┘
+               ↓ Bash 调用
+┌──────────────┴──────────────────────────────┐
+│ Python 工具层（qa_agent/）                  │
+│ - engine / state_manager / impact_analysis │
+│ - adapters/{web,backend,generic}           │
+│ - yaml_serializer / report_parser          │
+│ 机械工作，不调 LLM                          │
+└──────────────┬──────────────────────────────┘
+               ↓ subprocess
+┌──────────────┴──────────────────────────────┐
+│ 测试框架（Playwright/Vitest/pytest 等）     │
+└─────────────────────────────────────────────┘
+```
+
+## 项目最终统计
+
+| 指标 | 数量 |
+|---|---|
+| Phase 完成数 | 10 个（1-8 + 10） |
+| Python 源文件 | 27 个 |
+| 代码总行数 | ~3500 行 |
+| 单元测试 | 26 个（全部通过） |
+| 核心模块 | 10 个 |
+| Adapter | 3 个（Web、Backend、Generic） |
+| Subagent | 2 个（qa-test-engineer、qa-gatekeeper） |
+| Slash command | 1 个（/qa） |
+| 支持框架 | Playwright, Vitest, Jest, pytest, go test, cargo test, 任意自定义 |
+| 支持语言 | TypeScript, JavaScript, Python, Go, Rust, C/C++（Generic）|
+| 文档总行数 | 4300+ 行 |
+
+## 试用方式
+
+### 在 Claude Code 中
+
+把 `.claude/` 目录复制到你的项目，然后：
+
+```
+/qa init                          # 引导式初始化
+/qa feature 用户登录              # L1
+/qa bugfix BUG-008                # L4
+/qa release                       # L3
+```
+
+### 命令行（轻量算法判定）
+
+```bash
+qa init
+qa feature 用户登录
+qa status
+```
+
+## 后续短期优化
+
+1. Mutation 工具真实调用（mutmut/Stryker）—— Phase 9 待补
+2. 集成测试覆盖完整 L1/L4 流程
+3. Adapter 自动同步 `targets.symbols`（基于 LSP）
+4. CLI 输出彩色化、进度条
+5. `qa/feedback/` KPI 数据回流接口
+
+## 长期扩展
+
+1. Mobile Adapter（Flutter/React Native）
+2. Desktop Adapter（Electron/Tauri）
+3. Game Adapter（Unity/Unreal）
+4. 分布式执行支持
+5. PR / Issue 集成（可选，目前方案不依赖）

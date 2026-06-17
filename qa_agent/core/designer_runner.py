@@ -1,5 +1,18 @@
 """
 DesignerRunner: 测试设计 + 脚本生成 + 执行 + 收集失败
+
+架构定位（v3.0-rev2）：
+本类是 Python 工具层，不直接调用 LLM。
+LLM 推理工作（设计用例、生成脚本内容）由 Claude Code 的 subagent 完成
+（参见 .claude/agents/qa-test-engineer.md）。
+
+DesignerRunner 提供的职责：
+- 加载 / 保存用例库（YAML）
+- 调用 Adapter 真实执行测试
+- 收集失败结果，生成 Bug 记录
+- 持久化到 qa/ 目录
+
+LLM 推理由 subagent 通过 Claude Code 提供。
 """
 
 from typing import List, Dict, Any, Optional
@@ -11,7 +24,9 @@ from .config import load_config
 
 class DesignerRunner:
     """
-    DesignerRunner 角色：设计用例 + 生成脚本 + 执行测试
+    DesignerRunner 工具层：执行测试 + 收集失败 + 持久化
+
+    LLM 推理由 .claude/agents/qa-test-engineer.md subagent 完成。
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -25,28 +40,20 @@ class DesignerRunner:
         existing_cases: List[TestCase]
     ) -> List[TestCase]:
         """
-        设计测试用例（Phase 2 简化：返回现有用例）
+        加载已有用例（实际设计由 subagent 完成）
 
         Args:
             mode: 运行模式
             scope: 执行范围
-            requirements: 需求文档内容
+            requirements: 需求文档内容（可选，给 subagent 参考）
             existing_cases: 已有用例
 
         Returns:
-            设计/更新后的用例列表
+            用例列表（不修改，subagent 负责设计新用例并写入 YAML）
         """
-        # Phase 2: 简化实现，Phase 3 调用 LLM
-        print(f"[DesignerRunner] 设计模式: {mode.value}")
-
-        if mode in (Mode.L1, Mode.L2, Mode.L3):
-            # L1/L2/L3: 增量补用例或复核
-            print(f"[DesignerRunner] 基于需求设计用例（当前返回已有用例）")
-            return existing_cases
-        else:
-            # L0/L4: 跳过设计
-            print(f"[DesignerRunner] {mode.value} 模式跳过设计阶段")
-            return existing_cases
+        print(f"[DesignerRunner] 加载已有用例（模式 {mode.value}，{len(existing_cases)} 条）")
+        print(f"[DesignerRunner] 设计阶段由 qa-test-engineer subagent 完成")
+        return existing_cases
 
     def generate_scripts(
         self,
