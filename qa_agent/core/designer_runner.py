@@ -130,36 +130,51 @@ class DesignerRunner:
         Returns:
             Bug 列表
         """
+        from .yaml_serializer import BugSerializer
+        from datetime import datetime
+
         bugs = []
+        bug_index = 0
 
         for case_result in execution_result.get('cases', []):
             if case_result['status'] == 'fail':
+                bug_index += 1
+                bug_id = BugSerializer.next_bug_id()
+
                 bug = Bug(
-                    id=f"BUG-{len(bugs) + 1:03d}",
+                    id=bug_id,
                     title=f"测试失败: {case_result['case_id']}",
                     state='open',
-                    severity='medium',
+                    severity=self._infer_severity(case_result),
                     priority='P1',
                     related_cases=[case_result['case_id']],
                     related_requirements=[],
                     feature_id='',
                     repro_steps=[case_result.get('error', '未知错误')],
                     expected='PASS',
-                    actual='FAIL',
-                    created_at='',
+                    actual=case_result.get('error', 'FAIL'),
+                    created_at=datetime.now().isoformat(),
                     created_by='designer_runner'
                 )
                 bugs.append(bug)
 
         return bugs
 
+    def _infer_severity(self, case_result: Dict[str, Any]) -> str:
+        """根据失败信息推断严重级别"""
+        error = case_result.get('error', '').lower()
+        if any(kw in error for kw in ['crash', 'segfault', 'panic', 'fatal']):
+            return 'blocker'
+        if any(kw in error for kw in ['security', 'auth', 'permission']):
+            return 'high'
+        return 'medium'
+
     def save_bugs(self, bugs: List[Bug], qa_dir: Path = Path('qa')) -> None:
         """
         保存 Bug 到 qa/bugs/
         """
-        bugs_dir = qa_dir / 'bugs'
-        bugs_dir.mkdir(parents=True, exist_ok=True)
+        from .yaml_serializer import BugSerializer
 
         for bug in bugs:
-            # Phase 3: 写 YAML
-            print(f"[DesignerRunner] 保存 {bug.id}（Phase 3 写 YAML）")
+            filepath = BugSerializer.save(bug, qa_dir)
+            print(f"[DesignerRunner] 已保存 {bug.id} → {filepath}")

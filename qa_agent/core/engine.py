@@ -133,10 +133,14 @@ class Engine:
 
     def _load_all_cases(self):
         """
-        加载所有用例（Phase 2 实现真实加载）
+        加载所有用例（从 qa/cases/ 目录读取 YAML）
         """
-        # Stub: 返回空列表
-        return []
+        from .yaml_serializer import CaseSerializer
+        from pathlib import Path
+
+        cases = CaseSerializer.load_all(Path('qa'))
+        print(f"[Engine] 已加载 {len(cases)} 条用例")
+        return cases
 
     def _apply_user_overrides(
         self,

@@ -91,19 +91,147 @@ def test_{case.id.lower()}():
         return str(filepath.relative_to(self.cwd))
 
     def run(self, selection: List[TestCase], mode: str) -> RunResult:
-        """执行测试（Phase 6 真实执行）"""
-        print(f"[BackendAdapter] 执行 {len(selection)} 条用例（Phase 6 真实执行）...")
+        """执行测试（真实调用 pytest/go test/cargo test）"""
+        print(f"[BackendAdapter] 执行 {len(selection)} 条用例...")
 
-        # Phase 5 stub
-        return RunResult(
-            run_id='',
-            mode=mode,
-            total=len(selection),
-            pass_=len(selection),
-            fail=0,
-            skip=0,
-            cases=[{'case_id': c.id, 'status': 'pass', 'duration_ms': 50} for c in selection]
-        )
+        # 检测项目类型决定执行命令
+        if (self.cwd / 'pyproject.toml').exists() or (self.cwd / 'setup.py').exists():
+            return self._run_pytest(selection, mode)
+        elif (self.cwd / 'go.mod').exists():
+            return self._run_go_test(selection, mode)
+        elif (self.cwd / 'Cargo.toml').exists():
+            return self._run_cargo_test(selection, mode)
+        else:
+            raise RuntimeError("无法识别 Backend 项目类型")
+
+    def _run_pytest(self, cases: List[TestCase], mode: str) -> RunResult:
+        """调用 pytest 执行测试"""
+        import subprocess
+        import tempfile
+        from ..core.report_parser import PytestReportParser
+
+        # 收集测试文件
+        test_files = list(set(c.automation.get('file') for c in cases if c.automation.get('file')))
+
+        # 用临时文件接收 JUnit XML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as f:
+            xml_path = f.name
+
+        cmd = ['pytest', f'--junitxml={xml_path}', '--tb=short', '-q']
+        if test_files:
+            cmd.extend(test_files)
+
+        print(f"[BackendAdapter] 执行: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=self.cwd,
+                timeout=600
+            )
+
+            # 优先解析 JUnit XML
+            try:
+                with open(xml_path, 'r', encoding='utf-8') as f:
+                    xml_output = f.read()
+                parsed = PytestReportParser.parse_junit_xml(xml_output)
+            except Exception:
+                # 回退到文本解析
+                parsed = PytestReportParser.parse_text_output(result.stdout)
+
+            return RunResult(
+                run_id='',
+                mode=mode,
+                total=parsed['total'],
+                pass_=parsed['pass'],
+                fail=parsed['fail'],
+                skip=parsed['skip'],
+                cases=parsed['cases'] or []
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("pytest 执行超时（10 分钟）")
+        except FileNotFoundError:
+            raise RuntimeError("未找到 pytest，请运行：pip install pytest")
+        finally:
+            from pathlib import Path
+            Path(xml_path).unlink(missing_ok=True)
+
+    def _run_go_test(self, cases: List[TestCase], mode: str) -> RunResult:
+        """调用 go test"""
+        import subprocess
+        from ..core.report_parser import TapReportParser
+
+        cmd = ['go', 'test', '-v', './...']
+        print(f"[BackendAdapter] 执行: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=self.cwd,
+                timeout=300
+            )
+
+            # 简化：解析 go test 输出
+            output = result.stdout
+            passed = output.count('--- PASS:')
+            failed = output.count('--- FAIL:')
+
+            return RunResult(
+                run_id='',
+                mode=mode,
+                total=passed + failed,
+                pass_=passed,
+                fail=failed,
+                skip=0,
+                cases=[]
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("go test 执行超时（5 分钟）")
+        except FileNotFoundError:
+            raise RuntimeError("未找到 go，请确保 Go 已安装")
+
+    def _run_cargo_test(self, cases: List[TestCase], mode: str) -> RunResult:
+        """调用 cargo test"""
+        import subprocess
+
+        cmd = ['cargo', 'test', '--no-fail-fast']
+        print(f"[BackendAdapter] 执行: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=self.cwd,
+                timeout=600
+            )
+
+            # 简化：从输出提取统计
+            import re
+            summary = re.search(r'test result:.*?(\d+) passed; (\d+) failed', result.stdout)
+            if summary:
+                passed = int(summary.group(1))
+                failed = int(summary.group(2))
+            else:
+                passed, failed = 0, 0
+
+            return RunResult(
+                run_id='',
+                mode=mode,
+                total=passed + failed,
+                pass_=passed,
+                fail=failed,
+                skip=0,
+                cases=[]
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("cargo test 执行超时（10 分钟）")
+        except FileNotFoundError:
+            raise RuntimeError("未找到 cargo，请确保 Rust 已安装")
 
     def index_targets(self) -> Dict[str, Any]:
         return {}

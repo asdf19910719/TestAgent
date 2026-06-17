@@ -58,58 +58,46 @@ def resolve_bugfix_target(user_input: str, qa_dir: Path = Path('qa')) -> Optiona
 def load_bug_by_id(bug_id: str, qa_dir: Path) -> Optional[Bug]:
     """
     从 qa/bugs/<id>.yml 加载 Bug
-    Phase 3 实现 YAML 解析
     """
-    bug_path = qa_dir / 'bugs' / f'{bug_id}.yml'
-    if not bug_path.exists():
-        return None
-
-    # Phase 3: 解析 YAML
-    # Phase 2 stub: 返回模拟对象
-    return Bug(
-        id=bug_id,
-        title=f"模拟 Bug {bug_id}",
-        state='open',
-        severity='medium',
-        priority='P1',
-        related_cases=[],
-        related_requirements=[],
-        feature_id='',
-        repro_steps=[],
-        expected='',
-        actual=''
-    )
+    from .yaml_serializer import BugSerializer
+    return BugSerializer.load_by_id(bug_id, qa_dir)
 
 
 def fuzzy_search_bugs(keyword: str, qa_dir: Path) -> List[Bug]:
     """
     模糊匹配 bug 标题和 repro_steps
-    Phase 3 完整实现
     """
-    bugs_dir = qa_dir / 'bugs'
-    if not bugs_dir.exists():
-        return []
+    from .yaml_serializer import BugSerializer
 
-    # Phase 2 stub: 返回空
-    return []
+    all_bugs = BugSerializer.load_all(qa_dir, state_filter='open')
+
+    matches = []
+    keyword_lower = keyword.lower()
+
+    for bug in all_bugs:
+        score = 0
+        if keyword_lower in bug.title.lower():
+            score += 10
+        if any(keyword_lower in step.lower() for step in bug.repro_steps):
+            score += 5
+
+        if score > 0:
+            matches.append((bug, score))
+
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return [bug for bug, _ in matches[:5]]
 
 
 def create_bug_from_description(description: str, qa_dir: Path = Path('qa')) -> Bug:
     """
     从自然语言描述创建新 bug 记录
-    Phase 3 实现 LLM 总结
     """
     from datetime import datetime
+    from .yaml_serializer import BugSerializer
 
-    # 生成 bug ID
-    bugs_dir = qa_dir / 'bugs'
-    bugs_dir.mkdir(parents=True, exist_ok=True)
+    bug_id = BugSerializer.next_bug_id(qa_dir)
 
-    existing_bugs = list(bugs_dir.glob('BUG-*.yml'))
-    next_num = len(existing_bugs) + 1
-    bug_id = f'BUG-{next_num:03d}'
-
-    # Phase 3: 用 LLM 总结标题
+    # 从描述提取标题（取前 80 字符）
     title = description[:80] if len(description) > 80 else description
 
     bug = Bug(
@@ -128,7 +116,9 @@ def create_bug_from_description(description: str, qa_dir: Path = Path('qa')) -> 
         created_by='user_via_qa_bugfix'
     )
 
-    print(f"[Bug引用] 已创建新 bug 记录：{bug_id}")
-    print(f"[Bug引用] 请补充详情：qa/bugs/{bug_id}.yml（Phase 3 写 YAML）")
+    # 持久化
+    filepath = BugSerializer.save(bug, qa_dir)
+
+    print(f"[Bug引用] 已创建新 bug 记录：{bug_id} → {filepath}")
 
     return bug
