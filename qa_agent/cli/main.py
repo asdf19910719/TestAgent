@@ -151,6 +151,7 @@ def status():
     """查看当前测试覆盖状态"""
     from ..core.yaml_serializer import CaseSerializer, BugSerializer
     from ..core.state_manager import StateManager
+    from .ui import bold, green, yellow, red, cyan, dim
 
     cases = CaseSerializer.load_all(Path('qa'))
     bugs = BugSerializer.load_all(Path('qa'), state_filter='open')
@@ -158,9 +159,9 @@ def status():
     sm = StateManager()
     last_run = sm.load_last_run()
 
-    click.echo("\n📊 QA Agent 状态")
-    click.echo(f"\n用例库:")
-    click.echo(f"  总数: {len(cases)}")
+    click.echo(f"\n{bold('📊 QA Agent 状态')}")
+    click.echo(f"\n{bold('用例库')}:")
+    click.echo(f"  总数: {green(str(len(cases)))}")
 
     by_level = {}
     by_priority = {}
@@ -171,17 +172,19 @@ def status():
     click.echo(f"  按层级: {dict(by_level)}")
     click.echo(f"  按优先级: {dict(by_priority)}")
 
-    click.echo(f"\nOpen Bugs: {len(bugs)}")
+    color_fn = red if bugs else green
+    click.echo(f"\n{bold('Open Bugs')}: {color_fn(str(len(bugs)))}")
     for bug in bugs[:5]:
-        click.echo(f"  - {bug.id}: {bug.title} (severity={bug.severity})")
+        sev_color = red if bug.severity in ('blocker', 'high') else yellow
+        click.echo(f"  - {sev_color(bug.id)}: {bug.title} ({dim('severity=')}{bug.severity})")
 
     if last_run:
-        click.echo(f"\n最近运行:")
-        click.echo(f"  模式: {last_run['mode']}")
+        click.echo(f"\n{bold('最近运行')}:")
+        click.echo(f"  模式: {cyan(last_run['mode'])}")
         click.echo(f"  范围: {last_run['scope']}")
         click.echo(f"  状态: {last_run.get('status', 'unknown')}")
     else:
-        click.echo("\n暂无运行记录，运行 `qa feature <name>` 开始")
+        click.echo(f"\n{dim('暂无运行记录，运行')} {cyan('qa feature <name>')} {dim('开始')}")
 
 
 @cli.command()

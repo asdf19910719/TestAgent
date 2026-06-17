@@ -561,19 +561,35 @@ class Engine:
             return {'pass': True, 'results': {}}
 
     def _run_mutation_sampling(self, run_id: str) -> Dict[str, Any]:
-        """Mutation 抽样（Phase 6.2）"""
-        from .flaky import detect_flaky
+        """Mutation 抽样（Phase 12 真实集成）"""
+        from .mutation import MutationRunner
 
-        mutation_config = self.config.get('mutation', {})
+        # 获取语言和 capabilities
+        language = 'python'
+        capabilities = {'mutation': True}
 
-        if mutation_config.get('enabled') == 'auto':
-            # Phase 6 完整：检测工具可用性
-            print("[Mutation] 工具检测（Phase 6 完整实现）...")
+        if self.adapter:
+            try:
+                fingerprint = self.adapter.detect()
+                language = fingerprint.language
+                capabilities = fingerprint.capabilities
+            except Exception:
+                pass
 
-        print("[Mutation] 抽样 diff 涉及文件...")
-        # Phase 6 完整：调用 mutmut/Stryker
+        # 获取 diff 文件
+        try:
+            diff_files = self.impact_analyzer._git_diff_name_only('HEAD~1')
+        except Exception:
+            diff_files = []
 
-        return {'score': 0.75, 'killed': 15, 'total': 20}
+        # 执行 mutation
+        runner = MutationRunner(self.config, language=language)
+        result = runner.run(mode='L3', diff_files=diff_files, capabilities=capabilities)
+
+        print(f"[Mutation] {result['status']}: tool={result.get('tool')}, "
+              f"score={result.get('score', 0):.2%} ({result.get('killed', 0)}/{result.get('total', 0)})")
+
+        return result
 
     def _generate_run_id(self) -> str:
         """

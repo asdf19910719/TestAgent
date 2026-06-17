@@ -173,7 +173,9 @@ class ImpactAnalyzer:
         """
         result = subprocess.run(
             ['git', 'diff', '--name-only', base, 'HEAD'],
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
@@ -185,7 +187,9 @@ class ImpactAnalyzer:
         """
         result = subprocess.run(
             ['git', 'diff', base, 'HEAD'],
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
