@@ -1,7 +1,7 @@
 ---
 description: AI Test Engineer Agent - 五档测试模式（L0/L1/L2/L3/L4）+ 引导式初始化
 argument-hint: [init | feature <name> | bugfix <ref> | module <name> | release | retry | resume | status] [args...]
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 ---
 
 # /qa - AI Test Engineer Agent v3.0 Solo Edition
@@ -121,11 +121,11 @@ python -m qa_agent.cli.main discover-docs --path "doc/v2026-06-17-当前版本�
 
 **L1/L2/L3 委派 qa-test-engineer**：
 
-调用 Task 工具：
+调用 Agent 工具（优先）或 Task 工具：
 ```
-Task(
+Agent(
   subagent_type="qa-test-engineer",
-  description="L<?> 设计用例 + 生成测试脚本",
+  description="L<?> 设计用例 + 执行测试",
   prompt="""
   阅读 .claude/agents/qa-test-engineer.md 中的指令。
   
@@ -136,16 +136,23 @@ Task(
   - 需求文档: <路径>
   - 项目类型: <type>
   - 测试框架: <frameworks>
+  - 用例库状态: <空 | N 条已有用例>
   
   按照规范完成：
-  1. 增量补充用例（写入 qa/cases/<feature_id>/<id>.yml）
+  1. 设计用例（写入 qa/cases/<feature_id>/<id>.yml）
   2. 调用 Adapter 生成脚本（python -m qa_agent.cli.main scaffold --case <id>）
-  3. 执行测试（python -m qa_agent.cli.main execute --selection ...）
+  3. 主动启动环境 + 执行测试（包括 E2E）
   4. 收集失败 → qa/bugs/<id>.yml
   
   完成后告知"已完成 X 条用例设计 + 执行，Y 个失败"
   """
 )
+```
+
+⚠️ **如果当前环境不支持 Agent 工具**（如 CCM/DeepSeek），直接在当前上下文执行 qa-test-engineer.md 的完整指令，但必须：
+- 先阅读 `.claude/agents/qa-test-engineer.md`
+- 严格按其中规则操作
+- 完成后再阅读 `.claude/agents/qa-gatekeeper.md` 做独立判定
 ```
 
 ### 步骤 5：Gatekeeper 阶段（委派独立 Subagent）
@@ -243,6 +250,29 @@ python -m qa_agent.cli.main resolve-bugfix --ref "$ref"
   - `--with-compatibility` - 开兼容性矩阵
   - `--with-all-nonfunctional` - 全开
   - `--skip <dim>` - 跳过指定维度（必须登记到 release_gate_report.md）
+
+**⭐ L3 用例生成策略（关键区别于 L1/L2）**：
+
+L3 是发版门，**必须覆盖项目全部功能，不仅仅是最近修改**。
+
+1. **用例库为空或极少（< 10 条）时**：
+   - **不能**只看 git diff 生成增量用例
+   - **必须**基于需求文档（primary + design + api）做**完整需求覆盖**
+   - Designer 应当：
+     a) 阅读全部需求文档，提取所有功能点
+     b) 为每个功能点生成分层用例（unit / integration / system / acceptance）
+     c) 确保需求追踪矩阵 100% 覆盖
+   - 用例数量预期：中型项目 30-100 条，大型项目 100-500 条
+
+2. **用例库已有足够用例时**：
+   - 验证现有用例是否覆盖所有需求
+   - 补充缺失的用例
+   - 执行全部用例（不限数量，mode_limits.L3 = -1）
+
+3. **影响面分析**：
+   - L3 的影响面 = **全部用例**（不限 git diff 范围）
+   - git diff 仅用于确定 Mutation 测试的范围
+   - 不得因为 diff 为空就跳过测试
 
 ### `/qa retry`
 
