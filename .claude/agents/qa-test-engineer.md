@@ -206,40 +206,71 @@ mcp__gitnexus / mcp__gitnexus22 均不可用。
 
 ### E2E 测试环境启动规则（重要）
 
-**L1/L2/L3 模式下，Runner 必须主动启动环境并执行 E2E 测试，不得仅标记 BLOCKED 退出。**
+**所有模式（L0 除外）下，Runner 必须主动启动环境并执行 E2E 测试，不得仅标记 BLOCKED 退出。**
 
-执行顺序：
-1. 读取 `.qa-agent.yml` 中的 `dev_server` 和 `services` 配置
-2. 如果配置存在，**自动启动**（后台进程，等待 ready 信号）
-3. 如果配置不存在，**尝试检测**（package.json scripts / Makefile / docker-compose.yml）
-4. 启动后执行 E2E 测试（Playwright / Cypress / Selenium）
-5. 测试完成后**主动关闭**后台服务
+#### 自动检测启动命令（无需用户配置）
 
-**只有在以下条件全部满足时才允许标记 BLOCKED**：
-- 配置中无 dev_server 命令
-- 无法从项目中自动检测出启动方式
-- 尝试启动后报错（端口占用、依赖缺失等硬性失败）
+**Runner 必须自行分析项目结构，确定如何启动服务。检测逻辑：**
 
-**禁止的行为**：
-- ❌ 发现需要 dev server 就直接标 BLOCKED 退出
-- ❌ 输出"请用户启动服务"而不尝试自己启动
-- ❌ 只跑 unit test 就宣布 L3 完成
+1. **读 `.qa-agent.yml`**：如果有 `dev_server.command`，直接用
+2. **读 `package.json`**：
+   - `scripts.dev` → `npm run dev` / `pnpm dev` / `yarn dev`
+   - `scripts.start` → `npm start`
+   - `scripts.serve` → `npm run serve`
+   - 检测框架（Next.js / Vite / CRA）确定默认端口
+3. **读 `Makefile`**：找 `dev` / `serve` / `run` target
+4. **读 `docker-compose.yml`**：启动相关 services
+5. **读 `Cargo.toml`**：`cargo run`
+6. **读 `go.mod`**：`go run .`
+7. **读 `manage.py`（Django）**：`python manage.py runserver`
+8. **读 `build.gradle` / `pom.xml`**：`./gradlew bootRun` / `mvn spring-boot:run`
+9. **以上都无** → 用 Glob/Grep 搜索入口文件（main.ts / app.py / index.js）
 
-**启动命令检测优先级**：
-1. `.qa-agent.yml` 中的 `dev_server.command`
-2. `package.json` 中的 `scripts.dev` / `scripts.start`
-3. `Makefile` 中的 `dev` / `serve` target
-4. `docker-compose.yml` 中的 services
-5. 以上都无 → 向用户询问一次后记录到 `.qa-agent.yml`
+**端口检测**：
+- 从配置或源码中提取端口（grep `PORT` / `listen` / `3000` 等）
+- 常见默认：Vite=5173, Next=3000, CRA=3000, Django=8000, Spring=8080
 
-**启动后等待就绪**：
+#### 执行流程
+
 ```bash
-# 启动后台服务
-nohup <command> &
-# 等待端口可用（最多 30 秒）
-timeout 30 bash -c 'until curl -s http://localhost:<port> > /dev/null; do sleep 1; done'
-# 如 30 秒未就绪 → 标记 BLOCKED 并附日志
+# 1. 后台启动服务
+<command> &
+SERVER_PID=$!
+
+# 2. 等待就绪（最多 30 秒）
+for i in $(seq 1 30); do
+  curl -s http://localhost:<port> > /dev/null && break
+  sleep 1
+done
+
+# 3. 执行 E2E 测试
+npx playwright test ...
+
+# 4. 清理
+kill $SERVER_PID 2>/dev/null
 ```
+
+#### 适用模式
+
+| 模式 | E2E 行为 |
+|---|---|
+| L0 | 跳过 E2E（只跑 unit + smoke） |
+| L1 | **主动启动环境**，跑该功能的 E2E |
+| L2 | **主动启动环境**，跑模块级 E2E + 跨模块集成 |
+| L3 | **主动启动环境**，跑全部 E2E + 非功能测试 |
+| L4 | **主动启动环境**，跑 bug 复现用例（含 E2E） |
+
+#### 只允许 BLOCKED 的情况（硬性失败）
+
+- 端口已被占用且无法 kill（非本次启动的进程）
+- 依赖服务真的缺失（如需要外部数据库但无 docker）
+- 启动 30 秒超时且日志显示致命错误
+- 需要硬件设备（Android 模拟器、iOS Simulator）
+
+**即使 BLOCKED，也必须输出**：
+1. 尝试了什么命令
+2. 失败的具体错误日志
+3. 用户需要做什么（一句话）
 
 ### 失败循环防护（受 §5.7 上限保护）
 
