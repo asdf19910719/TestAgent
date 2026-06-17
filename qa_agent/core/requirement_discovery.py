@@ -340,3 +340,213 @@ def handle_missing_requirements(mode: str) -> str:
         return 'continue'
 
 
+# ============================================================
+# 动态路径支持：用户在 /qa feature 时指定目录，自动分类文档
+# ============================================================
+
+
+# 文档类型启发式分类关键词
+DOC_CLASSIFY_KEYWORDS = {
+    'acceptance': [
+        # 英文
+        'acceptance', 'criteria', 'gherkin', 'feature-file',
+        # 中文（acceptance 最先匹配，避免 '验收' 被 requirement 抢走）
+        '验收',
+    ],
+    'api': [
+        # 英文
+        'api', 'endpoint', 'rest', 'graphql', 'rpc', 'contract',
+        'openapi', 'swagger', 'protocol',
+        # 中文
+        '接口', '协议', '契约',
+    ],
+    'design': [
+        # 英文
+        'design', 'architecture', 'arch', 'tech', 'technical',
+        'data-model', 'class-diagram', 'sequence', 'flow',
+        'domain', 'capability', 'logical', 'physical',
+        # 中文
+        '设计', '架构', '技术方案', '数据模型', '类图', '流程', '领域',
+    ],
+    'requirement': [
+        # 英文
+        'requirement', 'req', 'prd', 'spec', 'user-story', 'story',
+        'feature', 'epic', 'backlog',
+        # 中文
+        '需求', '规格', '故事', '产品需求', '功能',
+    ],
+}
+
+
+# 排除的文件名关键词（明显不是需求/设计的）
+EXCLUDE_KEYWORDS = [
+    'readme', 'changelog', 'license', 'todo', 'history',
+    'meeting', 'minutes', 'log', 'note', 'draft', 'wip',
+    '会议', '记录', '草稿', '历史',
+]
+
+
+def discover_from_directory(directory: str, cwd: Path = Path('.')) -> Dict[str, Any]:
+    """
+    从用户指定目录中发现并分类文档
+
+    支持用户在 `/qa feature 短信绑定 --docs <directory>` 时使用：
+    - 自动扫描目录下所有 .md 文档
+    - 根据文件名启发式分类为：需求 / 设计 / API / 验收 / 其他
+    - 优先汇总文件（*-all.md / *-overview.md）
+
+    Args:
+        directory: 目录路径（可以是相对路径或绝对路径）
+        cwd: 当前工作目录
+
+    Returns:
+        {
+            'primary': str | None,        # 主需求文档
+            'design': str | None,         # 主设计文档
+            'api': str | None,            # 主 API 文档
+            'acceptance': str | None,     # 验收标准
+            'specs': List[str],           # 所有需求文档
+            'all_designs': List[str],     # 所有设计文档
+            'all_apis': List[str],        # 所有 API 文档
+            'all_docs': List[str],        # 目录下所有 md
+            'unclassified': List[str],    # 无法分类的文档
+            'source': 'dynamic',
+            'directory': str
+        }
+    """
+    # 解析路径
+    target_dir = Path(directory)
+    if not target_dir.is_absolute():
+        target_dir = cwd / directory
+
+    # 兼容 Windows 反斜杠路径
+    target_dir = Path(str(target_dir).replace('\\', '/'))
+
+    if not target_dir.exists():
+        return {
+            'primary': None,
+            'design': None,
+            'api': None,
+            'acceptance': None,
+            'specs': [],
+            'all_designs': [],
+            'all_apis': [],
+            'all_docs': [],
+            'unclassified': [],
+            'source': 'dynamic',
+            'directory': str(target_dir),
+            'error': f'目录不存在: {target_dir}'
+        }
+
+    # 扫描所有 md 文档（含子目录）
+    all_md_files = list(target_dir.rglob('*.md'))
+
+    # 分类
+    classified = {
+        'requirement': [],
+        'design': [],
+        'api': [],
+        'acceptance': [],
+        'unclassified': []
+    }
+
+    for md_file in all_md_files:
+        category = classify_document(md_file)
+        classified[category].append(md_file)
+
+    # 在每个分类中选择主文档（汇总优先）
+    primary = _select_aggregate_file(classified['requirement']) if classified['requirement'] else None
+    design = _select_aggregate_file(classified['design']) if classified['design'] else None
+    api = _select_aggregate_file(classified['api']) if classified['api'] else None
+    acceptance = _select_aggregate_file(classified['acceptance']) if classified['acceptance'] else None
+
+    # 如果没找到需求文档但有未分类文档，把未分类的当作潜在需求
+    if not primary and classified['unclassified']:
+        primary = _select_aggregate_file(classified['unclassified'])
+
+    return {
+        'primary': str(primary) if primary else None,
+        'design': str(design) if design else None,
+        'api': str(api) if api else None,
+        'acceptance': str(acceptance) if acceptance else None,
+        'specs': [str(p) for p in classified['requirement']],
+        'all_designs': [str(p) for p in classified['design']],
+        'all_apis': [str(p) for p in classified['api']],
+        'all_docs': [str(p) for p in all_md_files],
+        'unclassified': [str(p) for p in classified['unclassified']],
+        'source': 'dynamic',
+        'directory': str(target_dir)
+    }
+
+
+def classify_document(path: Path) -> str:
+    """
+    根据文件名启发式分类文档
+
+    Returns:
+        'requirement' | 'design' | 'api' | 'acceptance' | 'unclassified'
+    """
+    name_lower = path.stem.lower()
+    parent_lower = path.parent.name.lower()
+
+    # 第一优先级：父目录名
+    if parent_lower in ('prd', 'requirements', 'requirement', 'specs', 'spec',
+                         '需求', '产品需求'):
+        return 'requirement'
+    if parent_lower in ('design', 'architecture', 'arch', 'designs',
+                         '设计', '架构'):
+        return 'design'
+    if parent_lower in ('api', 'apis', 'contracts', 'endpoints', '接口'):
+        return 'api'
+    if parent_lower in ('acceptance', 'testing', 'verification', '验收', '测试'):
+        return 'acceptance'
+
+    # 排除明显非需求/设计的文件
+    if any(kw in name_lower for kw in EXCLUDE_KEYWORDS):
+        return 'unclassified'
+
+    # 按文件名匹配关键词
+    for category, keywords in DOC_CLASSIFY_KEYWORDS.items():
+        if any(kw in name_lower for kw in keywords):
+            return category
+
+    return 'unclassified'
+
+
+def merge_discovery_results(
+    auto_result: Dict[str, Any],
+    dynamic_result: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    合并自动发现和动态路径结果，动态优先
+
+    用户既配置了 .qa-agent.yml，又通过命令行指定了目录时使用
+    """
+    if not dynamic_result:
+        return auto_result
+
+    # 动态结果优先
+    merged = dict(auto_result)
+
+    for key in ['primary', 'design', 'api', 'acceptance']:
+        if dynamic_result.get(key):
+            merged[key] = dynamic_result[key]
+
+    # 合并文档列表
+    for key in ['specs', 'all_docs']:
+        if dynamic_result.get(key):
+            merged[key] = list(set(merged.get(key, []) + dynamic_result[key]))
+
+    if 'all_designs' in dynamic_result:
+        merged['all_designs'] = dynamic_result['all_designs']
+    if 'all_apis' in dynamic_result:
+        merged['all_apis'] = dynamic_result['all_apis']
+    if 'unclassified' in dynamic_result:
+        merged['unclassified'] = dynamic_result['unclassified']
+
+    merged['source'] = 'dynamic'
+    merged['directory'] = dynamic_result.get('directory')
+
+    return merged
+
+

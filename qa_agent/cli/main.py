@@ -215,17 +215,48 @@ def resume():
 @click.option('--mode', required=True, type=click.Choice(['L0', 'L1', 'L2', 'L3', 'L4']))
 @click.option('--scope', required=True)
 @click.option('--impact', type=click.Choice(['gitnexus', 'local']), default=None)
-def prepare(mode, scope, impact):
+@click.option('--docs-path', multiple=True, help='用户动态指定文档目录（可多次）')
+def prepare(mode, scope, impact, docs_path):
     """
     [Subagent 用] 影响面分析 + 生成 selection.md，不实际执行
 
     输出 qa/run/selection.md 和 qa/run/last.json（status=prepared）
+
+    支持动态文档路径：
+      --docs-path doc/v2026-06-17-当前版本文档/
+      --docs-path ai-docs/prd/
     """
     config_path = '.qa-agent.yml'
     engine = Engine(config_path)
 
     if impact:
         engine.config['impact_analysis'] = impact
+
+    # 动态文档发现
+    docs_info = None
+    if docs_path:
+        from ..core.requirement_discovery import discover_from_directory, merge_discovery_results
+        from ..core.requirement_discovery import discover_requirements
+
+        # 自动发现
+        auto = discover_requirements(engine.config)
+
+        # 动态目录发现
+        all_dynamic = []
+        for path in docs_path:
+            result = discover_from_directory(path)
+            all_dynamic.append(result)
+
+        # 合并：取第一个动态结果作为主，其他文档合并入 all_docs
+        primary_dynamic = all_dynamic[0] if all_dynamic else None
+        for d in all_dynamic[1:]:
+            primary_dynamic['all_docs'].extend(d.get('all_docs', []))
+
+        docs_info = merge_discovery_results(auto, primary_dynamic)
+    else:
+        # 仅自动发现
+        from ..core.requirement_discovery import discover_requirements
+        docs_info = discover_requirements(engine.config)
 
     # 加载用例
     all_cases = engine._load_all_cases()
@@ -274,8 +305,35 @@ def prepare(mode, scope, impact):
         'by_priority': selection['by_priority'],
         'impact_mode': impact_result['mode'],
         'selection_md_path': 'qa/run/selection.md',
-        'last_json_path': 'qa/run/last.json'
+        'last_json_path': 'qa/run/last.json',
+        'docs': {
+            'source': docs_info.get('source', 'unknown'),
+            'primary': docs_info.get('primary'),
+            'design': docs_info.get('design'),
+            'api': docs_info.get('api'),
+            'acceptance': docs_info.get('acceptance'),
+            'all_docs_count': len(docs_info.get('all_docs', [])),
+            'unclassified_count': len(docs_info.get('unclassified', [])),
+            'directory': docs_info.get('directory')
+        }
     }
+    click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@cli.command(name='discover-docs')
+@click.option('--path', required=True, help='文档目录路径')
+def discover_docs(path):
+    """
+    [Subagent 用] 扫描指定目录，按文件名分类文档
+
+    示例：
+      qa discover-docs --path doc/v2026-06-17-当前版本文档/
+
+    Subagent 用此命令在用户提供路径后获取文档分类
+    """
+    from ..core.requirement_discovery import discover_from_directory
+
+    result = discover_from_directory(path)
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 

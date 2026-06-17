@@ -22,14 +22,34 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
 | 命令 | 模式 | 行为 |
 |---|---|---|
 | `init` | - | 引导式初始化 |
-| `feature <name>` | L1 | 一个功能开发完后跑测试 |
-| `bugfix <ref>` | L4 | 修复缺陷后验证 |
-| `module <name>` | L2 | 模块/迭代完成 |
-| `release` | L3 | 发版前完整质量门 |
+| `feature <name> [需求文档在 <path>]` | L1 | 一个功能开发完后跑测试 |
+| `bugfix <ref> [需求文档在 <path>]` | L4 | 修复缺陷后验证 |
+| `module <name> [需求文档在 <path>]` | L2 | 模块/迭代完成 |
+| `release [需求文档在 <path>]` | L3 | 发版前完整质量门 |
 | `retry` | - | 重跑上次 selection |
 | `resume` | - | 恢复中断的 L3 |
 | `status` | - | 查看当前覆盖状态 |
 | `L0` / `L0 <scope>` | L0 | 单点 sanity 快速验证 |
+
+### 动态需求文档路径（重要）
+
+用户可在命令中**自然语言指定**文档目录，例如：
+
+- `/qa feature 短信绑定 需求文档在 doc/v2026-06-17-当前版本文档/`
+- `/qa feature 登录 文档在 /D:/AndroidProject/ClawBoxClient/ai-docs/prd/`
+- `/qa feature 支付 doc-path=/path/to/docs`
+- `/qa module 订单 --docs ai-docs/prd/`
+
+**解析策略**：
+- 优先匹配 `需求文档在 <path>` / `文档在 <path>` / `--docs <path>` / `--docs-path <path>` / `doc-path=<path>`
+- 提取 path 后传给 `python -m qa_agent.cli.main prepare --docs-path <path>`
+- 如有多个目录，可多次传 `--docs-path`
+
+**文档分类**（subagent 自动完成）：
+- 子目录名优先：`prd/` → 需求，`design/architecture/` → 设计，`api/apis/` → API
+- 文件名关键词：含 `requirement/prd/spec/需求/规格` → 需求；含 `design/architecture/技术方案/架构` → 设计
+- 汇总文件优先：`*-all.md` / `*-overview.md` / 含 "总/全量/汇总" 中文名
+- 无法分类的文档归入 `unclassified`，但仍作为参考材料
 
 ## 通用执行流程（L1/L2/L3/L4）
 
@@ -43,17 +63,41 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
      b) 切换到 `impact_analysis: local`
      c) 取消运行
 
-### 步骤 2：影响面分析（机械工作 - 调用 Python 工具）
+### 步骤 2：影响面分析 + 需求文档发现（机械工作 - 调用 Python 工具）
 
+**基础调用**（仅自动发现需求文档）：
 ```bash
 python -m qa_agent.cli.main prepare --mode <L?> --scope <scope>
 ```
 
-这会输出：
-- `qa/run/selection.md` - 选中的用例清单
-- `qa/run/last.json` - 状态文件（含 phase, checkpoint）
+**动态文档路径**（用户在命令中指定了 `需求文档在 <path>`）：
+```bash
+python -m qa_agent.cli.main prepare --mode <L?> --scope <scope> --docs-path "<path>"
+# 多个目录：
+python -m qa_agent.cli.main prepare --mode <L?> --scope <scope> \
+  --docs-path "doc/v2026-06-17-当前版本文档/" \
+  --docs-path "ai-docs/architecture/"
+```
 
-读取 `qa/run/selection.md` 获得用例列表。
+**预先扫描目录**（仅探查目录内容，不执行流程）：
+```bash
+python -m qa_agent.cli.main discover-docs --path "doc/v2026-06-17-当前版本文档/"
+# 返回分类后的文档清单 JSON
+```
+
+输出 JSON 包含分类结果：
+```json
+{
+  "primary": "doc/v2026-06-17-当前版本文档/产品需求文档.md",
+  "design": "doc/v2026-06-17-当前版本文档/技术方案.md",
+  "api": "doc/v2026-06-17-当前版本文档/接口设计.md",
+  "specs": [...],
+  "all_docs": [...],
+  "unclassified": [...]
+}
+```
+
+读取 `qa/run/selection.md` 获得用例列表，读取 `docs.primary` 获得主需求文档。
 
 ### 步骤 3：用户确认
 
