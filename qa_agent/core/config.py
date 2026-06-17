@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
         'gatekeeper_cache': True
     },
     'gitnexus': {
+        'mcp_tool_prefix': 'mcp__gitnexus',  # 本机用 gitnexus22 时改为 'mcp__gitnexus22'
         'upstream_depth': {
             'L0': 2,
             'L1': 3,

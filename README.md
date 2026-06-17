@@ -179,16 +179,56 @@ your-project/
 
 ## 支持的项目类型
 
-| 类型 | 适配器 | 状态 |
-|---|---|---|
-| Web 前端（Playwright/Vitest） | WebAdapter | ✅ 完整 |
-| Python 后端（pytest） | BackendAdapter | ✅ 完整 |
-| Go 后端（go test） | BackendAdapter | ✅ 完整 |
-| Rust（cargo test） | BackendAdapter | ✅ 完整 |
-| 其他（自定义命令） | GenericAdapter | ✅ 完整 |
-| 移动端 | MobileAdapter | 🔜 v1.5 |
-| 桌面应用 | DesktopAdapter | 🔜 v1.5 |
-| 游戏 | GameAdapter | 🔜 v2.0 |
+| 类型 | 适配器 | 状态 | 框架 |
+|---|---|---|---|
+| Web 前端 | WebAdapter | ✅ 完整 | Playwright, Vitest, Jest |
+| Python 后端 | BackendAdapter | ✅ 完整 | pytest |
+| Go 后端 | BackendAdapter | ✅ 完整 | go test |
+| Rust | BackendAdapter | ✅ 完整 | cargo test |
+| **Android** | **MobileAdapter** | ✅ **完整** | **JUnit, Espresso, Robolectric** |
+| **iOS** | **MobileAdapter** | ✅ **完整**（需配 scheme）| **XCTest, XCUITest** |
+| **Flutter** | **MobileAdapter** | ✅ **完整** | **flutter_test, integration_test** |
+| **React Native** | **MobileAdapter** | ✅ **完整** | **Jest, Detox** |
+| 任意（自定义命令） | GenericAdapter | ✅ 完整 | 任意（Make/Bazel/...） |
+| 桌面应用 | DesktopAdapter | 🔜 v1.5 | Electron, Tauri |
+| 游戏 | GameAdapter | 🔜 v2.0 | Unity, Unreal |
+
+## 支持的需求文档约定
+
+零配置识别以下框架的产出：
+
+| 框架/约定 | 路径 |
+|---|---|
+| 通用 docs | `docs/requirements.md`, `docs/design.md`, `docs/PRD.md` |
+| **AI 工作流框架** | **`ai-docs/*.md`**（`requirements.md` / `design.md` / `spec.md` / 中文文档名） |
+| BMAD | `.bmad/output/*.md` |
+| spec-kit | `specs/*/spec.md`, `specs/*/acceptance.feature` |
+| BDD | `features/*.feature` |
+| 项目根 | `REQUIREMENTS.md`, `PRD.md`, `SPEC.md`, `DESIGN.md` |
+
+显式配置（最高优先级）：
+
+```yaml
+# .qa-agent.yml
+requirements:
+  primary: my-docs/spec.md
+  ai_docs_dir: ai-docs/      # 自定义文档目录
+  bdd_dir: scenarios/
+```
+
+## GitNexus MCP 适配
+
+如果本机的 GitNexus MCP 服务名是 `gitnexus22`（而非默认 `gitnexus`），需在 `.qa-agent.yml` 配置：
+
+```yaml
+gitnexus:
+  mcp_tool_prefix: mcp__gitnexus22  # 默认 mcp__gitnexus
+```
+
+或临时通过环境变量切换：
+```bash
+export QA_GITNEXUS_TOOL_PREFIX=mcp__gitnexus22
+```
 
 ## License
 

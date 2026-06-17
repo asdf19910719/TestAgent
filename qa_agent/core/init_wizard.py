@@ -76,20 +76,52 @@ class InitWizard:
             'has_git': (self.cwd / '.git').exists()
         }
 
-        # 检测 Web 项目
-        if (self.cwd / 'package.json').exists():
-            detected['project_type'] = 'web'
-            detected['language'] = 'typescript' if (self.cwd / 'tsconfig.json').exists() else 'javascript'
+        # 检测 Flutter
+        if (self.cwd / 'pubspec.yaml').exists():
+            detected['project_type'] = 'mobile'
+            detected['language'] = 'dart'
+            detected['frameworks']['unit'] = 'flutter_test'
+            detected['frameworks']['integration'] = 'integration_test'
 
-            pkg = json.loads((self.cwd / 'package.json').read_text())
-            dev_deps = pkg.get('devDependencies', {})
+        # 检测 Android 原生（含多模块）
+        elif ((self.cwd / 'build.gradle').exists() or
+              (self.cwd / 'build.gradle.kts').exists() or
+              (self.cwd / 'app' / 'build.gradle').exists() or
+              (self.cwd / 'app' / 'build.gradle.kts').exists()):
+            detected['project_type'] = 'mobile'
+            detected['language'] = 'kotlin' if list(self.cwd.rglob('*.kt'))[:1] else 'java'
+            detected['frameworks']['unit'] = 'junit'
 
-            if 'vitest' in dev_deps:
-                detected['frameworks']['unit'] = 'vitest'
-            if 'jest' in dev_deps:
-                detected['frameworks']['unit'] = 'jest'
-            if 'playwright' in dev_deps or '@playwright/test' in dev_deps:
-                detected['frameworks']['e2e'] = 'playwright'
+        # 检测 iOS
+        elif list(self.cwd.glob('*.xcodeproj')) or (self.cwd / 'Package.swift').exists():
+            detected['project_type'] = 'mobile'
+            detected['language'] = 'swift'
+            detected['frameworks']['unit'] = 'xctest'
+
+        # 检测 Web / React Native（共享 package.json）
+        elif (self.cwd / 'package.json').exists():
+            try:
+                import json
+                pkg = json.loads((self.cwd / 'package.json').read_text(encoding='utf-8'))
+                deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+
+                if 'react-native' in deps:
+                    detected['project_type'] = 'mobile'
+                    detected['language'] = 'typescript' if (self.cwd / 'tsconfig.json').exists() else 'javascript'
+                    detected['frameworks']['unit'] = 'jest' if 'jest' in deps else 'unknown'
+                    if 'detox' in deps:
+                        detected['frameworks']['e2e'] = 'detox'
+                else:
+                    detected['project_type'] = 'web'
+                    detected['language'] = 'typescript' if (self.cwd / 'tsconfig.json').exists() else 'javascript'
+                    if 'vitest' in deps:
+                        detected['frameworks']['unit'] = 'vitest'
+                    if 'jest' in deps:
+                        detected['frameworks']['unit'] = 'jest'
+                    if 'playwright' in deps or '@playwright/test' in deps:
+                        detected['frameworks']['e2e'] = 'playwright'
+            except Exception:
+                detected['project_type'] = 'web'
 
         # 检测 Python 项目
         elif (self.cwd / 'pyproject.toml').exists() or (self.cwd / 'setup.py').exists():
@@ -110,7 +142,10 @@ class InitWizard:
             detected['frameworks']['unit'] = 'go test'
 
         # 检测测试目录
-        for test_dir in ['tests', 'test', '__tests__', 'e2e', 'specs']:
+        for test_dir in ['tests', 'test', '__tests__', 'e2e', 'specs',
+                         'app/src/test', 'app/src/androidTest',  # Android
+                         'integration_test',                       # Flutter
+                         'Tests']:                                 # iOS
             if (self.cwd / test_dir).exists():
                 detected['test_dirs'].append(test_dir)
 
@@ -146,6 +181,12 @@ class InitWizard:
             'language': detected['language'] or 'unknown',
             'frameworks': detected['frameworks'],
             'impact_analysis': 'gitnexus' if detected['has_git'] else 'local'
+        }
+
+        # GitNexus MCP 工具前缀（本机可能用 gitnexus22）
+        # 用户首次接入时会作为草稿出现在 .qa-agent.yml，可手动调整
+        config['gitnexus'] = {
+            'mcp_tool_prefix': 'mcp__gitnexus',  # 本机如用 gitnexus22 改为 mcp__gitnexus22
         }
 
         # Generic 项目需要手动配置测试命令
@@ -206,12 +247,29 @@ c) 稍后处理
 
     def _discover_requirements(self) -> Optional[Dict[str, Any]]:
         """
-        需求文档自动发现（简化版，完整版在 Phase 2）
+        需求文档自动发现（使用完整发现算法）
         """
-        for path_str in ['docs/requirements.md', 'docs/acceptance_criteria.md', 'README.md']:
-            path = self.cwd / path_str
-            if path.exists():
-                return {'primary': str(path)}
+        from .requirement_discovery import discover_requirements
+
+        result = discover_requirements({}, cwd=self.cwd)
+
+        if result.get('source') == 'reverse_engineered':
+            return None
+
+        # 返回主文档
+        if result.get('primary'):
+            return {
+                'primary': result['primary'],
+                'design': result.get('design'),
+                'specs_count': len(result.get('specs', [])),
+                'all_docs_count': len(result.get('all_docs', []))
+            }
+        elif result.get('all_docs'):
+            return {
+                'primary': result['all_docs'][0],
+                'all_docs_count': len(result['all_docs'])
+            }
+
         return None
 
     def _print_next_steps(self) -> None:

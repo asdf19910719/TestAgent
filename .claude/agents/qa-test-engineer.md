@@ -115,6 +115,21 @@ python -m qa_agent.cli.main scaffold --case <case_id>
 
 ## 工作流（按模式分支）
 
+### GitNexus MCP 工具
+
+影响面分析需要调用 GitNexus MCP 工具。**工具名称由 `.qa-agent.yml` 的 `gitnexus.mcp_tool_prefix` 决定**：
+
+- 默认前缀：`mcp__gitnexus` → 工具名 `mcp__gitnexus__detect_changes` / `mcp__gitnexus__impact`
+- 本机如配置 `gitnexus22` → 改前缀为 `mcp__gitnexus22` → 工具名 `mcp__gitnexus22__detect_changes` 等
+
+**调用前先读取 `.qa-agent.yml`**，确认实际工具名。如果调用失败，提示用户：
+
+```
+mcp__gitnexus__detect_changes 不可用。请在 .qa-agent.yml 配置：
+  gitnexus:
+    mcp_tool_prefix: mcp__gitnexus22  # 改为本机实际服务名
+```
+
 ### L1 Feature 流程
 
 1. 读取需求文档，识别新增/变更的需求点
