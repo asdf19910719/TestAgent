@@ -55,6 +55,16 @@ DEFAULT_CONFIG = {
             'L4': 3
         }
     },
+    # E2E 测试环境自动启动配置
+    'dev_server': {
+        'command': None,       # 如: 'npm run dev' / 'pnpm dev' / 'make serve'
+        'port': None,          # 如: 3000 / 5173 / 8080
+        'ready_timeout': 30,   # 等待就绪超时（秒）
+        'ready_check': None,   # 就绪检查 URL，如 'http://localhost:3000'
+    },
+    'services': [],            # 额外依赖服务，如:
+    # - {name: 'llm-backend', command: 'python server.py', port: 8000}
+    # - {name: 'db', command: 'docker-compose up -d postgres', port: 5432}
     'impact_fallback': 'prompt'
 }
 

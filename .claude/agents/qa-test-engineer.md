@@ -204,6 +204,43 @@ mcp__gitnexus / mcp__gitnexus22 均不可用。
 - 优先用 Testcontainers / docker-compose 启真依赖
 - 必须 mock 时在 `qa/test_plan.md` 显式记录
 
+### E2E 测试环境启动规则（重要）
+
+**L1/L2/L3 模式下，Runner 必须主动启动环境并执行 E2E 测试，不得仅标记 BLOCKED 退出。**
+
+执行顺序：
+1. 读取 `.qa-agent.yml` 中的 `dev_server` 和 `services` 配置
+2. 如果配置存在，**自动启动**（后台进程，等待 ready 信号）
+3. 如果配置不存在，**尝试检测**（package.json scripts / Makefile / docker-compose.yml）
+4. 启动后执行 E2E 测试（Playwright / Cypress / Selenium）
+5. 测试完成后**主动关闭**后台服务
+
+**只有在以下条件全部满足时才允许标记 BLOCKED**：
+- 配置中无 dev_server 命令
+- 无法从项目中自动检测出启动方式
+- 尝试启动后报错（端口占用、依赖缺失等硬性失败）
+
+**禁止的行为**：
+- ❌ 发现需要 dev server 就直接标 BLOCKED 退出
+- ❌ 输出"请用户启动服务"而不尝试自己启动
+- ❌ 只跑 unit test 就宣布 L3 完成
+
+**启动命令检测优先级**：
+1. `.qa-agent.yml` 中的 `dev_server.command`
+2. `package.json` 中的 `scripts.dev` / `scripts.start`
+3. `Makefile` 中的 `dev` / `serve` target
+4. `docker-compose.yml` 中的 services
+5. 以上都无 → 向用户询问一次后记录到 `.qa-agent.yml`
+
+**启动后等待就绪**：
+```bash
+# 启动后台服务
+nohup <command> &
+# 等待端口可用（最多 30 秒）
+timeout 30 bash -c 'until curl -s http://localhost:<port> > /dev/null; do sleep 1; done'
+# 如 30 秒未就绪 → 标记 BLOCKED 并附日志
+```
+
 ### 失败循环防护（受 §5.7 上限保护）
 
 - 单条用例自动修复尝试 ≤ 3 次
