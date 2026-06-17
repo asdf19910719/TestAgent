@@ -29,12 +29,30 @@ class ImpactAnalyzer:
         """
         执行影响面分析
         返回: {
-            'mode': 'gitnexus' | 'local',
+            'mode': 'gitnexus' | 'local' | 'full',
             'diff_files': List[str],
             'affected_symbols': List[str],
             'selected_cases': List[TestCase]
         }
         """
+        # L3 模式：选全部用例，不限于 diff（发版门必须覆盖全部功能）
+        if mode == Mode.L3:
+            active_cases = [
+                c for c in all_cases
+                if c.state.value in ('active', 'review')
+            ]
+            # 仍然获取 diff 信息（用于 mutation 测试范围，但不限制用例选择）
+            try:
+                diff_files = self._git_diff_name_only(diff_base)
+            except Exception:
+                diff_files = []
+            return {
+                'mode': 'full',
+                'diff_files': diff_files,
+                'affected_symbols': [],
+                'selected_cases': active_cases
+            }
+
         if self.mode == 'gitnexus':
             try:
                 return self._analyze_gitnexus(mode, all_cases, diff_base)
