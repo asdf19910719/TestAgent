@@ -110,12 +110,13 @@ class WebAdapter:
 
     def _generate_vitest_scaffold(self, case: TestCase) -> str:
         """生成 Vitest 测试骨架"""
+        steps_text = self._format_steps(case.steps, '    // ')
         return f"""import {{ describe, it, expect }} from 'vitest';
 
 describe('{case.feature_id}: {case.title}', () => {{
   it('should {case.title.lower()}', () => {{
     // TODO: 实现测试逻辑
-    // {chr(10).join('    // ' + step for step in case.steps)}
+{steps_text}
     expect(true).toBe(true); // 占位断言
   }});
 }});
@@ -123,11 +124,12 @@ describe('{case.feature_id}: {case.title}', () => {{
 
     def _generate_playwright_scaffold(self, case: TestCase) -> str:
         """生成 Playwright 测试骨架"""
+        steps_text = self._format_steps(case.steps, '  // ')
         return f"""import {{ test, expect }} from '@playwright/test';
 
 test('{case.id}: {case.title}', async ({{ page }}) => {{
   // TODO: 实现测试逻辑
-  // {chr(10).join('  // ' + step for step in case.steps)}
+{steps_text}
 
   await page.goto('http://localhost:3000'); // TODO: 替换为实际 URL
   // 占位断言
@@ -141,6 +143,39 @@ test('{case.id}: {case.title}', async ({{ page }}) => {{
         """
         print(f"[WebAdapter] targets 索引（Phase 5 实现）")
         return {}
+
+    @staticmethod
+    def _format_steps(steps, prefix: str = '    // ') -> str:
+        """
+        格式化用例步骤为注释，兼容多种格式：
+        - List[str]: ["步骤1", "步骤2"]
+        - List[dict]: [{"action": "...", "target": "..."}, ...]
+        - dict: {"step1": "...", "step2": "..."}
+        - str: "单个步骤"
+        - None
+        """
+        if not steps:
+            return f"{prefix}（无步骤描述）"
+
+        lines = []
+        if isinstance(steps, str):
+            lines.append(f"{prefix}{steps}")
+        elif isinstance(steps, dict):
+            for k, v in steps.items():
+                lines.append(f"{prefix}{k}: {v}")
+        elif isinstance(steps, list):
+            for s in steps:
+                if isinstance(s, str):
+                    lines.append(f"{prefix}{s}")
+                elif isinstance(s, dict):
+                    desc = s.get('description') or s.get('action') or s.get('step') or str(s)
+                    lines.append(f"{prefix}{desc}")
+                else:
+                    lines.append(f"{prefix}{s}")
+        else:
+            lines.append(f"{prefix}{steps}")
+
+        return '\n'.join(lines)
 
     def run(self, selection: List[TestCase], mode: str) -> RunResult:
         """

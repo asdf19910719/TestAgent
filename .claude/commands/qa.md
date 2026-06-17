@@ -121,13 +121,18 @@ python -m qa_agent.cli.main discover-docs --path "doc/v2026-06-17-当前版本�
 
 **L1/L2/L3 委派 qa-test-engineer**：
 
+**Agent 文件查找顺序**（依次尝试，找到即用）：
+1. `~/.claude/agents/qa-test-engineer.md`（全局，CCM 优先）
+2. `.claude/agents/qa-test-engineer.md`（项目级，官方 Claude Code）
+3. `~/.claude-ccm/agents/qa-test-engineer.md`（CCM 备用）
+
 调用 Agent 工具（优先）或 Task 工具：
 ```
 Agent(
   subagent_type="qa-test-engineer",
   description="L<?> 设计用例 + 执行测试",
   prompt="""
-  阅读 .claude/agents/qa-test-engineer.md 中的指令。
+  阅读 qa-test-engineer.md 中的指令（按上述查找顺序）。
   
   本次运行：
   - 模式: L<?>
@@ -150,9 +155,16 @@ Agent(
 ```
 
 ⚠️ **如果当前环境不支持 Agent 工具**（如 CCM/DeepSeek），直接在当前上下文执行 qa-test-engineer.md 的完整指令，但必须：
-- 先阅读 `.claude/agents/qa-test-engineer.md`
+- 先按上述查找顺序找到 qa-test-engineer.md（如果都找不到，输出错误并退出）
 - 严格按其中规则操作
-- 完成后再阅读 `.claude/agents/qa-gatekeeper.md` 做独立判定
+- 完成后再阅读 qa-gatekeeper.md 做独立判定（同样按查找顺序）
+
+⚠️ **L3 模式的 E2E 测试是强制项**，不允许只做代码审查就标"未执行"。
+必须按 qa-test-engineer.md 中"E2E 测试环境启动规则"主动启动环境并执行：
+- 读 package.json 找 dev/start 命令 → 后台启动
+- 等待端口就绪
+- 跑 Playwright/Cypress 测试
+- 测试完成后清理后台进程
 ```
 
 ### 步骤 5：Gatekeeper 阶段（委派独立 Subagent）
