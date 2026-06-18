@@ -134,7 +134,7 @@ def test_{case.id.lower()}():
 
         功能：
         - 智能分析引擎（7 大失败分类）
-        - 脚本自动修复
+        - 脚本自动修复（检测 → 修复 → 重试）
         - 专业 HTML 报告
         """
         import subprocess
@@ -146,7 +146,47 @@ def test_{case.id.lower()}():
         report_dir = self.cwd / 'qa' / 'backend' / 'reports'
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        # 调用 enhanced_execute_with_auth.py
+        # 检查是否启用自动修复
+        auto_fix = self.config.get('backend', {}).get('auto_fix_script_errors', True)
+
+        if auto_fix:
+            # 使用自动修复执行器
+            from .api_executor.script_auto_fixer import ScriptAutoFixer
+
+            fixer = ScriptAutoFixer(
+                workspace=self.cwd,
+                config=self.config.get('backend', {})
+            )
+
+            print(f"[BackendAdapter] 使用 API Test Executor + 自动修复 执行: {test_dir}")
+            fix_result = fixer.run_with_auto_fix(str(test_dir), str(report_dir))
+
+            if fix_result['fixes_applied']:
+                print(f"[BackendAdapter] 自动修复: {fix_result['fixes_applied']}")
+
+            # 读取结果
+            if fix_result['final_result_file']:
+                import json
+                results_data = json.loads(Path(fix_result['final_result_file']).read_text(encoding='utf-8'))
+                summary = results_data.get('summary', {})
+
+                return RunResult(
+                    total=summary.get('total', 0),
+                    passed=summary.get('passed', 0),
+                    failed=summary.get('failed', 0),
+                    skipped=summary.get('skipped', 0),
+                    exit_code=fix_result['exit_code'],
+                    stdout=fix_result.get('stdout', ''),
+                    stderr=fix_result.get('stderr', '')
+                )
+
+            return self._parse_stdout_to_result(
+                fix_result.get('stdout', ''),
+                fix_result.get('stderr', ''),
+                fix_result['exit_code']
+            )
+
+        # 不启用自动修复：直接执行
         cmd = [
             sys.executable,
             '-m', 'qa_agent.adapters.backend.api_executor.enhanced_execute_with_auth',
