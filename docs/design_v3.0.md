@@ -23,6 +23,21 @@
 * §8.5 新增 Mutation 工具降级算法（P1-3）
 * §10 实施路径调整：Phase 1 增加 `/qa init` 引导式初始化（P2-1）
 
+**rev2 修订（2026-06-18）— 断点恢复 Phase 2 + Baseline 管理**：
+
+* §8.4 检查点恢复机制升级为完整实现：
+  - 精确 Phase 跳转（`skip_phases` 参数）
+  - 已完成 Phase 结果复用（`cached_results` 参数）
+  - L1/L2/L4 断点恢复支持（`_resume_simple_mode_from_checkpoint`）
+  - 仅 Gatekeeper 执行模式（`_run_gatekeeper_only`）
+* §8.6 新增 Baseline 管理机制：
+  - 每次执行后自动更新 baseline（`update_baseline_after_run`）
+  - 合并策略（保留 `established_at`、累积 `total_cases`、追加 `history`）
+  - L3 Gatekeeper PASS 后自动保存基线
+* §8.7 新增智能默认恢复：
+  - 检测到 checkpoint → 自动恢复（默认行为）
+  - `--force-new` 参数强制重新开始
+
 ---
 
 ## 目录
@@ -2119,7 +2134,30 @@ def resume_l3_run() -> RunResult:
 
 2. **Baseline 管理机制**：每次测试执行后（任何模式）自动更新 `qa/run/baseline.json`，记录用例规模和历史，支持累积和时效性检查
 
-3. **L3 断点恢复实现**：跳过 Designer Phase（保留已有用例库），从主流程 E2E 开始执行，避免重新扫描项目和生成用例
+3. **L3 断点恢复实现（Phase 2 完整版）**：
+   - 精确 Phase 跳转：`_run_l3(skip_phases=[1,2,3])` 跳过已完成 Phase
+   - 结果复用：`cached_results={1: {...}, 2: {...}}` 避免重复执行
+   - 从磁盘加载用例：`_load_designed_cases_from_disk()` 跳过 Designer 时使用
+   - Phase 2-7 跳过时从缓存加载 failures/score
+
+4. **L1/L2/L4 断点恢复**：
+   - `_resume_simple_mode_from_checkpoint()` 统一处理
+   - Designer 完成 + Execute 完成 → `_run_gatekeeper_only()` 仅判定
+   - Designer 完成 + Execute 未完成 → 从 Execute 继续
+   - Designer 未完成 → 重新开始
+
+**核心 API**：
+
+```python
+# L3 精确跳转
+_run_l3(run_id, impact_result, skip_phases=[1,2,3], cached_results={...})
+
+# L1/L2/L4 恢复
+_resume_simple_mode_from_checkpoint(run_id, mode, last_run, selection, impact)
+
+# 仅 Gatekeeper
+_run_gatekeeper_only(run_id, mode, last_run)
+```
 
 **详细说明**：参见 [BASELINE_AND_CHECKPOINT.md](BASELINE_AND_CHECKPOINT.md)
 

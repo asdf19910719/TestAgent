@@ -478,23 +478,28 @@ rm qa/run/last.json
 
 ## 六、后续改进（Roadmap）
 
-### Phase 2 完整实现
+### Phase 2 完整实现 ✅ 已完成（2026-06-18）
 
-1. **精确 Phase 跳转**
-   - 根据 `current_phase` 精确跳转到对应阶段
-   - 避免重跑已完成的 Phase
+1. **精确 Phase 跳转** ✅
+   - `_run_l3(skip_phases=[1,2,3])` 跳过已完成 Phase
+   - 每个 Phase 检查是否在 skip_phases 中 → 打印 [已完成，跳过]
+   - Phase 1 跳过时从磁盘加载用例（`_load_designed_cases_from_disk`）
 
-2. **Phase 内断点续跑**
-   - Phase 3 执行到 50% → 只跑剩下 50%
-   - 需要细粒度的进度追踪
+2. **已完成 Phase 结果复用** ✅
+   - `_run_l3(cached_results={1: {...}, 2: {...}})` 传入缓存
+   - 从 checkpoint 的 `results_by_phase` 提取结果
+   - 跳过的 Phase 使用缓存的 failures/duration/score
 
-3. **已完成 Phase 结果复用**
-   - Phase 2 主流程 E2E 结果缓存
-   - 避免重复执行相同的测试
+3. **其他模式断点恢复** ✅
+   - `_resume_simple_mode_from_checkpoint()` 统一处理 L1/L2/L4
+   - Designer 完成 + Execute 完成 → `_run_gatekeeper_only()`
+   - Designer 完成 + Execute 未完成 → 从 Execute 继续
+   - Designer 未完成 → 重新开始
 
-4. **其他模式断点恢复**
-   - L1/L2/L4 也支持断点恢复
-   - 单 Phase 模式的断点策略
+4. **Phase 内断点续跑** ⚠️ 部分实现
+   - 当前：Phase 级别的跳转（整个 Phase 跳过或重跑）
+   - 未来：Phase 内用例级别（Phase 3 执行到第 15/30 条 → 只跑剩下 15 条）
+   - 需要细粒度进度追踪（每条用例完成后保存）
 
 ---
 
