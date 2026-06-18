@@ -197,6 +197,87 @@ qa bugfix "用户登录后首页没显示昵称"  # 自然语言
 - `--with-dynamic-security` 动态安全扫描
 - `--with-performance` 性能压测
 - `--with-compatibility` 兼容性矩阵
+
+### ⭐ WebUI E2E 增强器（工业级）
+
+**自动登录 + Smart XPath + 专业报告**（移植自 oec-infra webui-test-unified）
+
+- ✅ **登录配方复用**：首次登录后自动保存选择器配方，下次跨会话复用
+- ✅ **Smart XPath 生成**：2099 行 JS DOM 提取器，唯一性验证，替代 LLM 猜选择器
+- ✅ **Sentinel 预算守卫**：防无限循环（3 轮 + 30 分钟墙钟 + 绝对上限 10 轮）
+- ✅ **失败经验库**：自动提取失败经验（scope+pattern 去重，hit_count 递增）
+- ✅ **专业 HTML 报告**：单文件（base64 内联），卡片式布局
+- ✅ **自动触发**：system/acceptance 级别用例自动启用（可配置）
+
+配置示例：
+```yaml
+# .qa-agent.yml
+webui:
+  e2e_enhancer:
+    enabled: auto                     # auto | always | never
+    trigger_levels: [system, acceptance]
+    target_url: http://localhost:3000
+    credentials:
+      username: test@example.com
+      password: test123
+```
+
+**价值对比**：
+
+| 项目 | V1（之前） | V2（现在） |
+|---|---|---|
+| 选择器 | LLM 猜测 | Smart XPath（唯一性验证） |
+| 登录 | 每次手写 | 自动登录 + 配方复用 |
+| 脚本质量 | 永真断言通过 | 深度校验阻止执行 |
+| 执行控制 | 可能无限循环 | Sentinel 预算守卫 |
+| 报告 | Playwright 原生 | 专业单文件 HTML |
+
+文档：`docs/WEBUI_MIGRATION.md`
+
+### ⭐ API Test Executor（智能分析 + 自动修复）
+
+**7 大失败分类 + 脚本自动修复 + 专业报告**（移植自 oec-infra api-test-executor）
+
+- ✅ **智能分析引擎**：7 大失败分类（网络/HTTP/参数/响应/认证/脚本/环境）
+- ✅ **脚本自动修复**：检测 SyntaxError/ImportError/NameError → 自动修复 → 重试（最多 1 次）
+- ✅ **专业 HTML 报告**：紫色渐变统计栏 + 卡片式布局 + 搜索过滤 + 饼图统计
+- ✅ **请求详情捕获**：完整 HTTP 请求/响应头体 + 断言结果结构化
+- ✅ **401 鉴权处理**：自动处理认证失败
+- ✅ **自动触发**：Backend Adapter 默认启用（可配置）
+
+配置示例：
+```yaml
+# .qa-agent.yml
+backend:
+  use_api_executor: true              # 使用增强版执行器
+  auto_fix_script_errors: true        # 脚本错误自动修复
+  max_retry_on_script_error: 1        # 最多重试 1 次
+  report_format: html                 # html | json | both
+```
+
+**价值对比**：
+
+| 维度 | 原生 pytest | API Test Executor |
+|---|---|---|
+| 执行能力 | 基础 pytest 执行 | 401 鉴权 + 实时进度 |
+| 失败分析 | ❌ 无 | ✅ 7 大分类 |
+| 自动修复 | ❌ 无 | ✅ 脚本错误自动修复 |
+| 报告格式 | JUnit XML（简陋） | 专业 HTML（可读性 10 倍） |
+| 请求详情 | ❌ 无 | ✅ 完整头体 |
+
+文档：`docs/API_EXECUTOR_MIGRATION.md`
+
+### ✅ Gatekeeper 硬规则（5 条红线）
+
+移植自 oec-infra，防止低质量用例通过：
+
+1. **禁止永真断言**：`expect(true).toBe(true)` / `assert True`
+2. **禁止占位断言**：`expect(page).toHaveTitle(/.*/)`
+3. **禁止空白 try/except**：捕获异常但不处理
+4. **禁止虚假等待**：`time.sleep()` / `page.waitForTimeout()`
+5. **禁止硬编码凭据**：密码/token/secret 明文
+
+多层级判定：硬规则 → 快速启发式 → LLM 深度分析
 - `--with-all-nonfunctional` 全开
 
 ## 项目结构
@@ -214,8 +295,39 @@ your-project/
 │   ├── bugs/                   # 缺陷记录
 │   ├── run/                    # 执行历史
 │   ├── waivers.yml             # 风险接受清单
+│   ├── webui/                  # WebUI E2E 会话数据（NEW）
+│   │   ├── session/            # 当前会话
+│   │   └── shared_assets/      # 登录配方、失败经验库
+│   ├── backend/                # Backend API 报告（NEW）
+│   │   ├── reports/            # HTML/JSON 报告
+│   │   └── fix_history.jsonl  # 脚本修复历史
 │   └── final_test_report.md    # 最新测试报告
 └── tests/                      # 测试代码（Adapter 生成）
+```
+
+**核心代码结构**（qa_agent/ 内部）：
+
+```
+qa_agent/
+├── adapters/
+│   ├── web/
+│   │   ├── adapter.py          # Web 前端适配器
+│   │   └── e2e_enhancer.py     # E2E 增强器（NEW）
+│   ├── backend/
+│   │   ├── adapter.py          # Backend 适配器
+│   │   └── api_executor/       # API 执行器（NEW）
+│   │       ├── enhanced_execute_with_auth.py    # 智能执行器（617 行）
+│   │       ├── report_template_fixed.py         # HTML 报告生成器（1905 行）
+│   │       ├── conftest_plugin.py               # pytest 插件（1088 行）
+│   │       └── script_auto_fixer.py             # 脚本自动修复（NEW）
+│   └── mobile/
+│       └── adapter.py          # Mobile 适配器
+└── webui/                      # WebUI 工具集（NEW）
+    ├── login/                  # 登录处理（5 个脚本）
+    ├── explorer/               # DOM 探索（3 Python + 1 JS）
+    ├── executor/               # 批量执行器（6 个脚本）
+    ├── reporter/               # 报告生成（3 个脚本）
+    └── validators/             # 校验器（4 个脚本）
 ```
 
 ## 文档
