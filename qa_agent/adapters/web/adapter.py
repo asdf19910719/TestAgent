@@ -123,17 +123,48 @@ describe('{case.feature_id}: {case.title}', () => {{
 """
 
     def _generate_playwright_scaffold(self, case: TestCase) -> str:
-        """生成 Playwright 测试骨架"""
+        """生成 Playwright 测试骨架（V2 模板驱动）"""
         steps_text = self._format_steps(case.steps, '  // ')
+
+        # 生成断言占位（基于 assertions）
+        assertions_placeholder = ""
+        if case.assertions:
+            assertions_placeholder = "\n  // 断言检查（根据用例填充）："
+            for i, assertion in enumerate(case.assertions[:5], 1):  # 最多展示 5 条
+                if isinstance(assertion, str):
+                    assertions_placeholder += f"\n  // {i}. {assertion}"
+                elif isinstance(assertion, dict):
+                    assertions_placeholder += f"\n  // {i}. {assertion.get('description', assertion)}"
+
         return f"""import {{ test, expect }} from '@playwright/test';
 
+/**
+ * 用例 ID: {case.id}
+ * 标题: {case.title}
+ * 优先级: {case.priority.value}
+ * 测试级别: {case.level.value}
+ *
+ * ⚠️ LLM 填充指引：
+ * 1. 替换所有 TODO 标记的部分
+ * 2. 根据步骤和断言实现测试逻辑
+ * 3. 禁止保留占位断言（expect(page).toHaveTitle(/.*/);）
+ * 4. 禁止保留永真断言（expect(true).toBe(true);）
+ */
+
 test('{case.id}: {case.title}', async ({{ page }}) => {{
-  // TODO: 实现测试逻辑
+  // 环境准备
+  const baseURL = process.env.BASE_URL || 'http://localhost:3000';
+
+  // 测试步骤
 {steps_text}
 
-  await page.goto('http://localhost:3000'); // TODO: 替换为实际 URL
-  // 占位断言
-  await expect(page).toHaveTitle(/.*/);
+  // TODO: 根据用例步骤实现导航和操作
+  await page.goto(baseURL);
+{assertions_placeholder}
+
+  // TODO: 根据用例断言实现验证逻辑
+  // ❌ 禁止保留此占位断言，必须替换为真实断言
+  await expect(page).toHaveTitle(/.*/);  // <-- 占位断言，必须删除
 }});
 """
 

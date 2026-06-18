@@ -228,13 +228,46 @@ python -m qa_agent.cli.main scaffold --case <case_id>
 
 ### Designer 生成用例的步骤
 
+**核心约束（移植自 oec-infra test-design-agent）**：
+
+❌ **禁止从零裸写完整用例 YAML + 测试脚本**。
+✅ **必须采用"模板驱动 + 业务逻辑填充"模式**：
+
+1. **第一步：调用 scaffold 生成结构化骨架**
+   ```bash
+   python -m qa_agent.cli.main scaffold --case <case_id>
+   ```
+   scaffold 输出：
+   - YAML 模板（包含完整字段，带占位符和注释）
+   - 测试脚本骨架（函数签名、fixture、标记，`# TODO` 占位）
+
+2. **第二步：LLM 只填充业务逻辑部分**
+   - 用例 YAML：填充 `steps` / `assertions` / `preconditions`
+   - 测试脚本：只填充 `# TODO` 标记的部分（选择器、断言、业务逻辑）
+   - **禁止**：删除模板结构从零写、跳过字段、改变模板格式
+
+3. **第三步：校验层检查**
+   - 检查 YAML 必填字段是否完整
+   - 检查测试脚本是否还有 `# TODO` 或永真断言（`expect(true).toBe(true)`）
+   - 检查 assertions 是否和 steps 对应
+
+**为什么这么做**？
+- LLM 裸写容易遗漏字段（如 `targets`、`environment`）
+- LLM 裸写容易写永真断言（`assert True`）
+- 模板确保结构一致性，LLM 专注业务逻辑
+
+---
+
+**生成步骤详细流程**：
+
 1. **扫描项目结构**，建立功能模块清单
 2. **识别每个模块的主流程**（用户完成核心任务的路径）
 3. **按端类型维度矩阵**，为每个模块确定需要覆盖的维度
 4. **用公式估算用例数**，确保不会过少
-5. **先生成主流程用例**（E2E 级别）
-6. **再补充异常/边界/容错**（unit/integration 级别）
-7. **输出覆盖矩阵**，确认无遗漏
+5. **先调用 scaffold 生成主流程用例骨架**（E2E 级别）
+6. **再调用 scaffold 生成异常/边界/容错用例骨架**（unit/integration 级别）
+7. **LLM 填充所有骨架的业务逻辑部分**
+8. **输出覆盖矩阵**，确认无遗漏
 
 ## 工作流（按模式分支）
 
