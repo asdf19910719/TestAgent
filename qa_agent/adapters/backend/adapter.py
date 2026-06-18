@@ -14,8 +14,11 @@ class BackendAdapter:
     支持：pytest（Python）、go test、cargo test
     """
 
-    def __init__(self, cwd: Path = Path('.')):
+    def __init__(self, cwd: Path = Path('.'), config: Dict[str, Any] = None):
         self.cwd = cwd
+        self.config = config or {}
+        # 检测是否启用 API Test Executor
+        self.use_api_executor = self.config.get('backend', {}).get('use_api_executor', True)
 
     def detect(self) -> ProjectFingerprint:
         """检测项目类型"""
@@ -105,7 +108,97 @@ def test_{case.id.lower()}():
             raise RuntimeError("无法识别 Backend 项目类型")
 
     def _run_pytest(self, cases: List[TestCase], mode: str) -> RunResult:
-        """调用 pytest 执行测试"""
+        """
+        调用 pytest 执行测试
+
+        如果 use_api_executor=True（默认），使用增强版执行器（智能分析 + 自动修复 + HTML 报告）
+        否则使用原生 pytest
+        """
+        # 收集测试文件
+        test_files = list(set(c.automation.get('file') for c in cases if c.automation.get('file')))
+
+        if not test_files:
+            print("[BackendAdapter] 无测试文件可执行")
+            return RunResult(total=0, passed=0, failed=0, skipped=0, exit_code=0, stdout="", stderr="")
+
+        # 使用 API Test Executor（增强版）
+        if self.use_api_executor:
+            return self._run_with_api_executor(test_files, mode)
+
+        # 降级：使用原生 pytest
+        return self._run_with_native_pytest(test_files, mode)
+
+    def _run_with_api_executor(self, test_files: List[str], mode: str) -> RunResult:
+        """
+        使用 API Test Executor 执行测试（增强版）
+
+        功能：
+        - 智能分析引擎（7 大失败分类）
+        - 脚本自动修复
+        - 专业 HTML 报告
+        """
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        # 确定测试目录
+        test_dir = Path(test_files[0]).parent if test_files else self.cwd / 'tests'
+        report_dir = self.cwd / 'qa' / 'backend' / 'reports'
+        report_dir.mkdir(parents=True, exist_ok=True)
+
+        # 调用 enhanced_execute_with_auth.py
+        cmd = [
+            sys.executable,
+            '-m', 'qa_agent.adapters.backend.api_executor.enhanced_execute_with_auth',
+            '--test-dir', str(test_dir),
+            '--report-dir', str(report_dir)
+        ]
+
+        print(f"[BackendAdapter] 使用 API Test Executor 执行: {test_dir}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=self.cwd,
+                timeout=600
+            )
+
+            # 读取生成的 JSON 结果
+            import json
+            from datetime import datetime
+
+            # 查找最新的 test_results_*.json
+            json_files = sorted(report_dir.glob('test_results_*.json'), reverse=True)
+            if json_files:
+                results_data = json.loads(json_files[0].read_text(encoding='utf-8'))
+                summary = results_data.get('summary', {})
+
+                return RunResult(
+                    total=summary.get('total', 0),
+                    passed=summary.get('passed', 0),
+                    failed=summary.get('failed', 0),
+                    skipped=summary.get('skipped', 0),
+                    exit_code=result.returncode,
+                    stdout=result.stdout,
+                    stderr=result.stderr
+                )
+
+            # 降级：解析 stdout
+            return self._parse_stdout_to_result(result.stdout, result.stderr, result.returncode)
+
+        except subprocess.TimeoutExpired:
+            print("[BackendAdapter] 执行超时")
+            return RunResult(total=1, passed=0, failed=1, skipped=0, exit_code=124,
+                           stdout="", stderr="Timeout after 600s")
+        except Exception as e:
+            print(f"[BackendAdapter] API Test Executor 执行失败: {e}")
+            # 降级到原生 pytest
+            return self._run_with_native_pytest(test_files, mode)
+
+    def _run_with_native_pytest(self, test_files: List[str], mode: str) -> RunResult:
+        """使用原生 pytest 执行测试（降级方案）"""
         import subprocess
         import tempfile
         from ...core.report_parser import PytestReportParser
@@ -121,7 +214,7 @@ def test_{case.id.lower()}():
         if test_files:
             cmd.extend(test_files)
 
-        print(f"[BackendAdapter] 执行: {' '.join(cmd)}")
+        print(f"[BackendAdapter] 原生 pytest: {' '.join(cmd)}")
 
         try:
             result = subprocess.run(
@@ -142,21 +235,33 @@ def test_{case.id.lower()}():
                 parsed = PytestReportParser.parse_text_output(result.stdout)
 
             return RunResult(
-                run_id='',
-                mode=mode,
-                total=parsed['total'],
-                pass_=parsed['pass'],
-                fail=parsed['fail'],
-                skip=parsed['skip'],
-                cases=parsed['cases'] or []
+                total=parsed.get('total', 0),
+                passed=parsed.get('passed', 0),
+                failed=parsed.get('failed', 0),
+                skipped=parsed.get('skipped', 0),
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr
             )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("pytest 执行超时（10 分钟）")
-        except FileNotFoundError:
-            raise RuntimeError("未找到 pytest，请运行：pip install pytest")
         finally:
-            from pathlib import Path
-            Path(xml_path).unlink(missing_ok=True)
+            import os
+            if os.path.exists(xml_path):
+                os.unlink(xml_path)
+
+    def _parse_stdout_to_result(self, stdout: str, stderr: str, exit_code: int) -> RunResult:
+        """从 stdout 解析测试结果（降级方案）"""
+        from ...core.report_parser import PytestReportParser
+        parsed = PytestReportParser.parse_text_output(stdout)
+
+        return RunResult(
+            total=parsed.get('total', 0),
+            passed=parsed.get('passed', 0),
+            failed=parsed.get('failed', 0),
+            skipped=parsed.get('skipped', 0),
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr
+        )
 
     def _run_go_test(self, cases: List[TestCase], mode: str) -> RunResult:
         """调用 go test"""

@@ -54,6 +54,13 @@ DEFAULT_CONFIG = {
             'fallback_on_login_failure': True,  # 登录失败时回退到普通骨架
         }
     },
+    'backend': {
+        # Backend API 测试配置（移植自 oec-infra api-test-executor）
+        'use_api_executor': True,  # 使用增强版执行器（智能分析 + 自动修复 + HTML 报告）
+        'auto_fix_script_errors': True,  # 脚本错误自动修复
+        'max_retry_on_script_error': 1,  # 脚本错误最多重试次数
+        'report_format': 'html',  # html | json | both
+    },
     'gitnexus': {
         # MCP 工具前缀（列表，按优先级依次尝试）
         'mcp_tool_prefixes': ['mcp__gitnexus', 'mcp__gitnexus22'],
