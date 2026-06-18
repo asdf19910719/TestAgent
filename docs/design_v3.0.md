@@ -2111,6 +2111,20 @@ def resume_l3_run() -> RunResult:
 * 检查点 24 小时内有效
 * git 大幅变化时警告并提供"重新开始"选项
 
+---
+
+**v3.0 实现更新（2026-06-18）**：
+
+1. **智能默认恢复**：检测到 checkpoint 时自动恢复（不再需要 `--resume` 参数），使用 `--force-new` 强制重新开始
+
+2. **Baseline 管理机制**：每次测试执行后（任何模式）自动更新 `qa/run/baseline.json`，记录用例规模和历史，支持累积和时效性检查
+
+3. **L3 断点恢复实现**：跳过 Designer Phase（保留已有用例库），从主流程 E2E 开始执行，避免重新扫描项目和生成用例
+
+**详细说明**：参见 [BASELINE_AND_CHECKPOINT.md](BASELINE_AND_CHECKPOINT.md)
+
+---
+
 ### 8.5 Mutation 工具降级算法（P1-3）
 
 ```python
