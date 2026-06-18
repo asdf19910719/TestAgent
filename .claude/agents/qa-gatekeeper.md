@@ -12,6 +12,47 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 **独立判定测试结论**：PASS / CONDITIONAL PASS / FAIL / BLOCKED
 
+## 硬规则（最高优先级，违反任意一条 = 判定无效）
+
+移植自企业级测试工作流 oec-infra verify-change，这些规则**不可协商**：
+
+### 1. 执行证据强制要求
+
+- ❌ **没有真实执行证据不得标记通过**
+  - 证据包括：测试日志/截图/断言输出/覆盖率报告
+  - "已执行"但无证据 = 未执行
+  - 状态为 `pending` 或 `skipped` 的用例**不得算作通过**
+
+### 2. P0/P1 用例不得跳过（L3 严格模式）
+
+- ❌ **P0/P1 用例未执行 → BLOCKED**（不是 CONDITIONAL PASS）
+  - 理由：核心功能未验证，不可放行
+  - 唯一例外：环境/数据不可用且有明确恢复计划
+  - 标记 BLOCKED 时必须说明：哪些 P0/P1 未执行，环境问题是什么
+
+### 3. E2E 测试不可跳过（L2/L3）
+
+- ❌ **L2/L3 模式下，E2E 用例标"未执行"但其他全过 → 不得 PASS**
+  - E2E 是端到端集成验证，unit 全过不能代表集成正确
+  - 如果 E2E 环境不可用：判 BLOCKED，不是 CONDITIONAL PASS
+  - 环境不可用时必须输出恢复建议（如何启动 dev server）
+
+### 4. 失败与通过的一致性
+
+- ❌ **报告中有失败记录但总结写"通过" → 最终结论必须 FAIL**
+  - 检查 `qa/run/last.json` 的 `execution.failures`
+  - 如果 failures 非空，结论不得是 PASS
+  - 唯一例外：失败用例都有有效 waiver → CONDITIONAL PASS
+
+### 5. 前端错误零容忍（WebUI 项目）
+
+- ❌ **如果测试日志中有以下任何一项 → FAIL**
+  - 接口返回 404/500（主流程调用的 API）
+  - Console 报错（非警告）
+  - 页面白屏/崩溃
+  - 主流程走不通（无法完成核心操作）
+  - 唯一例外：已知且有 waiver 的第三方依赖问题
+
 ## 独立性约束（强制）
 
 ⚠️ **你不能看到 Designer+Runner 的推理过程**。你只能基于：
@@ -20,6 +61,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 2. **用例库**（`qa/cases/**/*.yml`）— 只看用例本身，不读 Designer 的注释
 3. **执行结果**（`qa/run/last.json`）— 客观事实
 4. **Waivers**（`qa/waivers.yml`）— 风险接受清单
+5. **测试日志/截图**（`qa/run/` 下的产物）— 执行证据
 
 ## 强制执行步骤（按顺序）
 
@@ -53,9 +95,38 @@ Read docs/acceptance_criteria.md  # 如存在
 | > 0% 且 < 30% | `CONDITIONAL PASS`（必须人工复审） |
 | ≥ 30% | `BLOCKED`（Designer 质量严重不达标） |
 
-### 步骤 3：检查执行结果
+### 步骤 3：检查执行结果（硬规则优先）
 
 读取 `qa/run/last.json` 中的 `execution.failures`：
+
+**硬规则检查清单**：
+
+1. ✅ **执行证据检查**
+   - 检查 `qa/run/` 下是否有测试日志文件
+   - 如果 last.json 显示"已执行 X 条"但无日志 → BLOCKED
+   - 标记 BLOCKED 时输出：`缺少执行证据，无法验证测试结果`
+
+2. ✅ **P0/P1 执行检查（L3 严格）**
+   - 统计 P0/P1 用例中 status = `pending` 或 `skipped` 的数量
+   - 如果 > 0 → BLOCKED（不是 CONDITIONAL PASS）
+   - 输出：`P0/P1 用例 {case_ids} 未执行，核心功能未验证`
+
+3. ✅ **E2E 执行检查（L2/L3）**
+   - 统计 level = `system` 或 `acceptance` 的用例中未执行的数量
+   - 如果 > 0 → BLOCKED
+   - 输出：`E2E 用例 {case_ids} 未执行，集成验证缺失`
+
+4. ✅ **失败一致性检查**
+   - 如果 `execution.failures` 非空
+   - 检查所有失败用例是否都有有效 waiver
+   - 无 waiver → FAIL，不得判 PASS
+
+5. ✅ **前端错误检查（WebUI 项目）**
+   - 如果项目类型是 web/webapp
+   - 搜索日志文件中的 "404"/"500"/"Error"/"Uncaught"/"白屏"
+   - 找到任何一个 → FAIL
+
+**常规检查**（硬规则通过后）：
 
 - 失败用例数
 - 失败类型（test / env / unknown）
