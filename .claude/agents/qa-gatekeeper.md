@@ -78,6 +78,57 @@ tools: Read, Write, Edit, Bash, Glob, Grep
    - "发现 X 个已有测试文件未纳入 YAML 管理，请确认是否需要执行"
    - "静态检查占比过高（Y%），无法验证用户行为，请补充 E2E 测试"
 
+### 7. E2E 执行证据强制检查（L2/L3 - 防止"假 E2E"）⭐
+
+- ❌ **标记为 E2E PASS 但无执行证据 → BLOCKED**
+  - **背景**：StudySkill 事件中 AI 把 `body.includes('阅读')` 标记为 E2E PASS，实际未启动浏览器
+  - **检查方法**：对每个标记为 E2E 的用例，检查 `qa/run/<case_id>.log` 和产物
+  - **证据类型**：
+    1. 日志中包含浏览器操作关键词（`Browser launched` / `page.click` / `chromium.launch`）
+    2. 存在截图文件（`qa/run/screenshots/<case_id>.png`）
+    3. 存在视频文件（`qa/run/videos/<case_id>.webm`）
+    4. 存在 Playwright trace（`qa/run/traces/<case_id>.zip`）
+  - **判定**：至少有一种证据 → 有效 E2E；全无 → 不是真正的 E2E
+
+#### 具体检查步骤：
+
+```python
+# 使用 Python 工具检查
+from qa_agent.core.e2e_evidence import check_all_e2e_cases
+
+result = check_all_e2e_cases()
+# result = {
+#   'total': 10,
+#   'with_evidence': 8,
+#   'without_evidence': 2,
+#   'cases_without_evidence': [
+#     {'case_id': 'TC-E2E-001', 'reason': '日志仅包含静态检查'},
+#     ...
+#   ]
+# }
+
+if result['without_evidence'] > 0:
+    # 判 BLOCKED，输出警告
+    print(f"发现 {result['without_evidence']} 个 E2E 用例无执行证据")
+    for case in result['cases_without_evidence']:
+        print(f"  - {case['case_id']}: {case['reason']}")
+```
+
+或者手动检查关键用例：
+
+```bash
+# 读取日志
+Read qa/run/TC-E2E-001.log
+
+# 检查关键词
+# ✅ 有效 E2E：包含 "Browser launched" / "page.goto" / "page.click"
+# ❌ 假 E2E：仅包含 "fs.existsSync" / ".includes("
+```
+
+**判定规则**：
+- 如果 > 30% 的 E2E 用例无证据 → BLOCKED（"大量假 E2E，未真实验证用户行为"）
+- 如果 ≤ 30% 无证据 → CONDITIONAL PASS（"部分 E2E 证据缺失，建议复核"）
+
 ## 独立性约束（强制）
 
 ⚠️ **你不能看到 Designer+Runner 的推理过程**。你只能基于：
@@ -119,6 +170,179 @@ Read docs/acceptance_criteria.md  # 如存在
 | 0% | 不影响判定 |
 | > 0% 且 < 30% | `CONDITIONAL PASS`（必须人工复审） |
 | ≥ 30% | `BLOCKED`（Designer 质量严重不达标） |
+
+### 步骤 2.5：判定前强制追问（L2/L3 - 防止"阻力最小路径"）⭐
+
+**在给出 PASS 判定前，必须回答以下 6 个问题。任何一个答案不合理 → 判 BLOCKED。**
+
+这是 StudySkill L3 质量逃逸事件的直接修复：用户追问 6 次才暴露真相，现在把这 6 次追问固化成你的自检清单。
+
+#### 问题 1：主流程覆盖 — "用户能走通所有核心任务吗？"
+
+**检查步骤**：
+1. 读取 `qa/run/main_flows.md`（主流程清单）
+2. 对每条主流程，检查是否有对应的 E2E 用例
+3. 这些 E2E 用例的状态是什么？（PASS / FAIL / SKIP / BLOCKED）
+
+**判定规则**：
+- 如果 `main_flows.md` 不存在 → 质疑："L3 未提取主流程清单，无法评估核心覆盖"
+- 如果任何主流程没有对应 E2E → BLOCKED："主流程 X 无 E2E 覆盖"
+- 如果任何主流程 E2E 是 SKIP/BLOCKED/FAIL → BLOCKED："主流程 X 未验证通过"
+
+**示例**：
+```
+main_flows.md 内容：
+1. 用户登录并进入首页
+2. 用户创建学习计划
+3. 用户完成学习并获得积分
+
+检查：
+- 登录流程 → TC-LOGIN-001 (PASS) ✅
+- 创建学习计划 → TC-STUDY-CREATE-001 (SKIP) ❌
+- 完成学习 → 无对应用例 ❌
+
+结论：BLOCKED（主流程 2、3 未验证）
+```
+
+#### 问题 2：测试质量 — "通过的测试验证了什么？"
+
+**检查步骤**：
+1. 读取 `qa/run/coverage_warning.json`（如存在）
+2. 检查 `by_level` 字段，计算静态检查占比
+3. 检查 E2E 级别测试数量
+
+**判定规则**：
+- 静态检查占比 > 70% → 质疑："覆盖率虚高，大部分是文件/符号检查"
+- E2E 级别测试 = 0 且项目有测试文件 > 10 → 质疑："无 E2E 验证，未测试用户行为"
+- 如果 `coverage_warning.json` 存在且有 `reason` → 必须输出警告
+
+**示例**：
+```
+coverage_warning.json:
+{
+  "existing_test_files": 47,
+  "by_level": {
+    "static_check": 33,
+    "unit": 8,
+    "e2e": 6
+  }
+}
+
+静态检查占比：33/47 = 70%（临界）
+E2E 数量：6 个
+
+结论：需要关注静态检查占比过高，建议补充行为验证测试
+```
+
+#### 问题 3：失败分析 — "失败/跳过的是什么？"
+
+**检查步骤**：
+1. 读取 `qa/run/last.json` 中的 `execution.failures`
+2. 识别失败/跳过用例的 `priority` 和 `level`
+
+**判定规则**：
+- P0/P1 用例 SKIP/FAIL → BLOCKED（硬规则 2）
+- E2E 用例 SKIP 且无分析原因 → 质疑："E2E 跳过但未说明原因"
+- 如果失败都是 P3 边界用例 → 可接受
+
+**示例**：
+```
+failures: [
+  {id: "TC-STUDY-EXAM-001", priority: "P0", level: "system", status: "SKIP", reason: "LLM timeout"},
+  {id: "TC-BOUNDARY-001", priority: "P3", level: "unit", status: "FAIL"}
+]
+
+P0 E2E 跳过 → 必须质疑："为什么 LLM 超时？有没有尝试 mock？"
+```
+
+#### 问题 4：执行真实性 — "E2E 真的操作了浏览器吗？"
+
+**检查步骤**：
+1. 对每个标记为 E2E PASS 的用例，检查执行证据
+2. 读取 `qa/run/<case_id>.log`（如存在）
+3. 检查是否有浏览器启动日志 / 截图 / 视频
+
+**判定规则**：
+- 标记 E2E PASS 但日志中无 `playwright` / `chromium` / `page.click` → 质疑："不是真正的 E2E"
+- 标记 E2E PASS 但无截图/视频 → 警告："缺少视觉证据"
+
+**检查关键词**：
+```
+浏览器启动证据：
+- "Browser launched"
+- "chromium.launch"
+- "page.goto"
+- "page.click"
+- "page.fill"
+
+静态检查特征（不算 E2E）：
+- 仅有 "fs.existsSync"
+- 仅有 ".includes("
+- 无浏览器操作日志
+```
+
+#### 问题 5：环境问题区分 — "'环境问题'是真的吗？"
+
+**检查步骤**：
+1. 对标记为"环境问题"的失败，读取失败原因
+2. 检查是否有修复尝试记录
+
+**判定规则**：
+- 标记"LLM 超时"但未尝试 mock → 质疑："为什么不用 mock 重试？"
+- 标记"服务启动失败"但未单独运行服务验证 → 质疑："服务真的启动不了？"
+- 标记"ESM 兼容问题"但未尝试替代方案 → 质疑："为什么不用 Node 直跑？"
+
+**追问模板**：
+```
+失败原因："LLM API 超时"
+追问：
+1. 有没有尝试增加超时时间？
+2. 有没有尝试 MOCK_LLM=true 模式？
+3. 有没有用预置数据替代 LLM 生成？
+4. 如果都试过还失败 → 才算真正的环境问题
+```
+
+#### 问题 6：覆盖规模 — "用例数量合理吗？"
+
+**检查步骤**：
+1. 读取 `qa/run/last.json` 中的 `selection.total`
+2. 估算项目规模（模块数 / 已有测试文件数）
+
+**判定规则**（已在硬规则 6 中实现，这里重复检查）：
+- L3 用例数 < max(模块数×3, 测试文件数×0.5, 20) → BLOCKED
+- 用例数量异常少（< 10）但无 waiver → 质疑："用例规模是否充分？"
+
+#### 追问 checklist 使用方式
+
+在步骤 4（给出最终判定）之前，**先回答这 6 个问题，并在报告中输出每个问题的答案**：
+
+```markdown
+## 判定前追问检查
+
+### 1. 主流程覆盖
+- main_flows.md: 发现 4 条主流程
+- 对应 E2E: 全部通过 ✅
+
+### 2. 测试质量
+- 静态检查占比: 33/47 = 70%（临界）⚠️
+- E2E 数量: 6 个 ✅
+
+### 3. 失败分析
+- P0/P1 失败: 无 ✅
+- E2E 跳过: 无 ✅
+
+### 4. 执行真实性
+- 已检查 6 个 E2E 用例日志，全部包含浏览器操作证据 ✅
+
+### 5. 环境问题区分
+- 无"环境问题"标记 ✅
+
+### 6. 覆盖规模
+- 用例总数: 47 条（6 YAML + 41 已有测试）✅
+- 符合规模要求 ✅
+
+**追问结论**：6 个问题中有 1 个警告（静态检查占比高），但不阻塞发版。
+```
 
 ### 步骤 3：检查执行结果（硬规则优先）
 

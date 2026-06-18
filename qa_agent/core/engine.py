@@ -60,6 +60,23 @@ class Engine:
         all_cases = self._load_all_cases()
 
         if mode == Mode.L3:
+            # L3 Phase 0: 主流程清单显式确认（防止 AI "阻力最小路径"）
+            print("\n[Engine] L3 准备阶段 - 提取主流程清单")
+            main_flows = self._extract_main_flows()
+
+            if main_flows:
+                self.state_manager.save_main_flows(main_flows)
+                print(f"\n识别到 {len(main_flows)} 条主流程：")
+                for i, flow in enumerate(main_flows, 1):
+                    print(f"  {i}. {flow['title']}")
+                print("\n这些是用户的核心任务路径吗？")
+                print("提示：主流程 = 用户完成核心目标的最短路径")
+                print("如果缺少关键流程，请在 qa/run/main_flows.md 中补充")
+            else:
+                print("[Engine] 警告：未能从需求文档提取主流程清单")
+                print("[Engine] 请手动创建 qa/run/main_flows.md，每行一条主流程")
+                self.state_manager.save_main_flows([])
+
             # L3 Phase A: 检查用例库是否充分
             existing_tests = discover_tests(Path('.'))
             adequate, reason = check_l3_coverage_adequacy(
@@ -616,3 +633,69 @@ class Engine:
         生成 run ID
         """
         return f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _extract_main_flows(self) -> List[Dict[str, Any]]:
+        """
+        从需求文档提取主流程清单
+
+        主流程 = 用户完成核心任务的最短路径
+        提取规则：
+        1. 从需求文档标题/小节提取"用户故事"
+        2. 识别动词短语（登录、创建、提交、查看）
+        3. 过滤掉管理/配置类操作（非核心用户任务）
+
+        Returns:
+            [
+                {'title': '用户登录并进入首页', 'source': 'docs/requirements.md#L23'},
+                {'title': '用户创建学习计划', 'source': 'docs/requirements.md#L45'},
+                ...
+            ]
+        """
+        main_flows = []
+        requirements_paths = self._discover_requirement_docs()
+
+        for req_path in requirements_paths:
+            try:
+                content = Path(req_path).read_text(encoding='utf-8')
+                lines = content.split('\n')
+
+                for i, line in enumerate(lines, 1):
+                    # 识别用户故事（标题行 + 动词关键词）
+                    if line.startswith('#') or line.startswith('##'):
+                        title = line.lstrip('#').strip()
+                        # 核心动词过滤
+                        core_verbs = [
+                            '登录', '注册', '创建', '添加', '提交', '发布',
+                            '查看', '浏览', '搜索', '筛选', '下载', '导出',
+                            '编辑', '修改', '删除', '取消', '支付', '购买',
+                            '学习', '练习', '考试', '评分', '分享',
+                        ]
+                        if any(verb in title for verb in core_verbs):
+                            # 排除管理/配置类
+                            exclude_words = ['管理', '配置', '设置', '权限', '审核']
+                            if not any(word in title for word in exclude_words):
+                                main_flows.append({
+                                    'title': title,
+                                    'source': f"{req_path}#L{i}"
+                                })
+
+            except Exception as e:
+                print(f"[Engine] 读取需求文档失败: {req_path}, {e}")
+
+        return main_flows[:20]  # 最多 20 条，避免过多
+
+    def _discover_requirement_docs(self) -> List[str]:
+        """发现需求文档路径"""
+        candidates = [
+            'docs/requirements.md',
+            'docs/需求文档.md',
+            'docs/PRD.md',
+            'docs/design.md',
+            'ai-docs/requirements.md',
+            '.bmad/output/requirements.md',
+        ]
+        config_path = self.config.get('requirements', {}).get('primary', '')
+        if config_path:
+            candidates.insert(0, config_path)
+
+        return [p for p in candidates if Path(p).exists()]

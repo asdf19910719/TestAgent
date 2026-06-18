@@ -213,6 +213,32 @@ class StateManager:
         self._atomic_write_json(self.run_dir / "coverage_warning.json", warning)
         print(f"[StateManager] 覆盖警告已保存: {self.run_dir / 'coverage_warning.json'}")
 
+    def save_main_flows(self, main_flows: list) -> None:
+        """
+        保存主流程清单（L3 主流程显式确认）
+
+        写入 qa/run/main_flows.md，人类可读 + Gatekeeper 可检查。
+        """
+        content = "# 主流程清单（L3 Release Gate）\n\n"
+        content += "> 这些是用户完成核心任务的最短路径。\n"
+        content += "> Gatekeeper 会检查每条主流程是否有对应的 E2E 用例通过。\n\n"
+
+        if not main_flows:
+            content += "⚠️ **未提取到主流程清单**\n\n"
+            content += "请手动补充：\n\n"
+            content += "```\n1. 用户登录并进入首页\n2. 用户创建XX并提交\n3. ...\n```\n"
+        else:
+            for i, flow in enumerate(main_flows, 1):
+                title = flow.get('title', '未知流程')
+                source = flow.get('source', '')
+                content += f"{i}. **{title}**\n"
+                if source:
+                    content += f"   - 来源: `{source}`\n"
+                content += "\n"
+
+        (self.run_dir / "main_flows.md").write_text(content, encoding='utf-8')
+        print(f"[StateManager] 主流程清单已保存: {self.run_dir / 'main_flows.md'}")
+
     def _atomic_write_json(self, path: Path, data: Dict[str, Any]) -> None:
         """
         原子写 JSON（先写临时文件再 rename）
