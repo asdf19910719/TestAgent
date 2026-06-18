@@ -154,7 +154,21 @@ class ScriptAutoFixer:
     def __init__(self, workspace: Path, config: Dict[str, Any] = None):
         self.workspace = workspace
         self.config = config or {}
-        self.max_retries = self.config.get('max_retry_on_script_error', 1)
+
+        # 从 repair_loop 配置读取重试次数
+        from qa_agent.core.repair_loop import get_repair_loop_config
+        try:
+            repair_cfg = get_repair_loop_config(self.config)
+            self.max_retries = repair_cfg.max_retries_per_case
+            self.auto_fix_enabled = repair_cfg.script_auto_fix_enabled
+            print(f"[AutoFixer] repair_loop.mode={repair_cfg.mode}, "
+                  f"max_retries={self.max_retries}, "
+                  f"auto_fix_enabled={self.auto_fix_enabled}")
+        except Exception:
+            # 降级：从 backend 配置读取（向后兼容）
+            self.max_retries = self.config.get('backend', {}).get('max_retry_on_script_error', 1)
+            self.auto_fix_enabled = self.config.get('backend', {}).get('auto_fix_script_errors', True)
+
         self.fix_history: List[Dict[str, Any]] = []
         self.history_file = workspace / 'qa' / 'backend' / 'fix_history.jsonl'
 
@@ -290,6 +304,32 @@ class ScriptAutoFixer:
                 'final_result_file': str,
             }
         """
+        # 如果未启用自动修复，直接执行一次
+        if not self.auto_fix_enabled:
+            print("[AutoFixer] auto_fix_enabled=False, 执行测试不重试")
+            cmd = [
+                sys.executable,
+                '-m', 'qa_agent.adapters.backend.api_executor.enhanced_execute_with_auth',
+                '--test-dir', test_dir,
+                '--report-dir', report_dir,
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                cwd=str(self.workspace), timeout=600
+            )
+            # 查找结果文件
+            report_path = Path(report_dir)
+            json_files = sorted(report_path.glob('test_results_*.json'), reverse=True)
+            return {
+                'exit_code': result.returncode,
+                'attempts': 1,
+                'fixes_applied': [],
+                'final_result_file': str(json_files[0]) if json_files else '',
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+            }
+
+        # 启用自动修复：循环重试
         attempts = 0
         fixes_applied = []
 

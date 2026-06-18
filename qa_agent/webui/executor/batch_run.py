@@ -22,9 +22,11 @@ from pathlib import Path
 #   - 跨会话串扰场景：旧 session 遗留的 sentinel 会阻止新执行 → 用 --force-reopen 重置。
 
 SENTINEL_FILE_NAME = '.session_sentinel.json'
-BUDGET_MAX_ROUNDS = 3
-BUDGET_MAX_WALL_CLOCK = 1800  # 30 min
-BUDGET_ABSOLUTE_MAX = 10  # hard ceiling even with --force-reopen
+
+# 预算上限（默认值，可被 repair_loop 配置覆盖）
+BUDGET_MAX_ROUNDS = 3           # 默认最多 3 轮
+BUDGET_MAX_WALL_CLOCK = 1800    # 默认 30 分钟
+BUDGET_ABSOLUTE_MAX = 10        # 绝对上限（即使 --force-reopen 也不能突破）
 
 _SESSION_BASE_DEFAULT = 'qa/webui/session'
 
@@ -1152,7 +1154,29 @@ def main():
 
     workspace = Path(args.workspace).resolve()
 
-    # ── Step 0: Session Sentinel 守卫 ─────────────────────
+    # ── Step 0a: 加载 repair_loop 配置并覆盖预算上限 ─────────────────────
+    global BUDGET_MAX_ROUNDS, BUDGET_MAX_WALL_CLOCK
+    try:
+        # 尝试加载配置文件
+        import sys
+        sys.path.insert(0, str(workspace))
+        from qa_agent.core.config import load_config
+        from qa_agent.core.repair_loop import get_repair_loop_config
+
+        config = load_config(workspace)
+        repair_cfg = get_repair_loop_config(config)
+
+        # 覆盖默认值
+        BUDGET_MAX_ROUNDS = repair_cfg.max_execution_rounds
+        print(f'[config] repair_loop.mode={repair_cfg.mode}, '
+              f'max_execution_rounds={BUDGET_MAX_ROUNDS}, '
+              f'per_case_attempts={repair_cfg.max_retries_per_case}')
+    except Exception as e:
+        # 配置加载失败，使用默认值
+        print(f'[config] 无法加载 repair_loop 配置，使用默认值: {e}')
+        pass
+
+    # ── Step 0b: Session Sentinel 守卫 ─────────────────────
     sentinel = _read_sentinel(workspace)
 
     # Hard ceiling: even --force-reopen cannot exceed BUDGET_ABSOLUTE_MAX

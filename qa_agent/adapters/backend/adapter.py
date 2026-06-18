@@ -155,7 +155,7 @@ def test_{case.id.lower()}():
 
             fixer = ScriptAutoFixer(
                 workspace=self.cwd,
-                config=self.config.get('backend', {})
+                config=self.config  # 传递完整配置，让 fixer 读取 repair_loop
             )
 
             print(f"[BackendAdapter] 使用 API Test Executor + 自动修复 执行: {test_dir}")
