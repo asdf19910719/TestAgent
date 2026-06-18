@@ -279,17 +279,85 @@ class StateManager:
 
     def save_baseline(self, baseline: Dict[str, Any]) -> None:
         """
-        保存用例规模基线（第一次 L3 完成后）
+        保存/更新用例规模基线
 
         baseline 包含：
-        - established_at: 建立时间
+        - established_at: 首次建立时间（不覆盖）
+        - updated_at: 最近更新时间
         - established_by: 建立时的 run_id
+        - updated_by: 最近更新的 run_id
         - total_cases: 基线用例总数
         - by_module: {module_name: case_count}
+        - by_level: {level: count}
         - coverage_matrix: {module: [dimension1, dimension2, ...]}
         - target_coverage: 预期覆盖标准
+        - completeness: 'partial' | 'full'（L3 完成为 full）
+        - history: [{run_id, mode, total_cases, timestamp}, ...]
         """
+        # 合并已有基线（保留 established_at 和 history）
+        existing = self.load_baseline()
+        if existing:
+            baseline.setdefault('established_at', existing.get('established_at'))
+            baseline.setdefault('established_by', existing.get('established_by'))
+            # 追加 history
+            history = existing.get('history', [])
+            history.append({
+                'run_id': baseline.get('updated_by', 'unknown'),
+                'mode': baseline.get('mode', 'unknown'),
+                'total_cases': baseline.get('total_cases', 0),
+                'timestamp': baseline.get('updated_at', datetime.now().isoformat()),
+            })
+            # 只保留最近 20 条
+            baseline['history'] = history[-20:]
+        else:
+            baseline['history'] = []
+
         self._atomic_write_json(self.baseline_path, baseline)
+
+    def update_baseline_after_run(self, run_id: str, mode: str, selection: Dict[str, Any],
+                                   execution: Dict[str, Any] = None) -> None:
+        """
+        每次测试执行后自动更新基线
+
+        调用时机：Engine.run() 完成后（无论什么模式）
+        """
+        now = datetime.now().isoformat()
+        total_cases = selection.get('total', 0)
+
+        # 只在有实际用例时更新（避免空执行覆盖已有基线）
+        if total_cases == 0:
+            return
+
+        existing = self.load_baseline()
+
+        # 计算 completeness
+        completeness = 'full' if mode == 'L3' else 'partial'
+        # 如果已有 full 基线，非 L3 模式不降级
+        if existing and existing.get('completeness') == 'full' and mode != 'L3':
+            completeness = 'full'
+
+        # 合并用例数（取较大值，因为 L1 可能只跑了子集）
+        if existing:
+            existing_total = existing.get('total_cases', 0)
+            total_cases = max(total_cases, existing_total)
+
+        baseline = {
+            'established_at': existing.get('established_at', now) if existing else now,
+            'established_by': existing.get('established_by', run_id) if existing else run_id,
+            'updated_at': now,
+            'updated_by': run_id,
+            'mode': mode,
+            'total_cases': total_cases,
+            'by_level': selection.get('by_level', {}),
+            'by_priority': selection.get('by_priority', {}),
+            'completeness': completeness,
+            'pass_rate': execution.get('pass_rate', '') if execution else '',
+            'target_coverage': '主流程全覆盖 + 异常/边界 + 容错',
+        }
+
+        self.save_baseline(baseline)
+        print(f"[Baseline] 已更新: {total_cases} 条用例, "
+              f"completeness={completeness}, mode={mode}")
 
     def load_baseline(self) -> Optional[Dict[str, Any]]:
         """

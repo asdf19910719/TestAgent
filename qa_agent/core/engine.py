@@ -48,6 +48,22 @@ class Engine:
         Returns:
             执行结果摘要
         """
+        # 步骤 0: 检查是否有未完成的 checkpoint 可恢复
+        resumable = self._check_resumable_checkpoint(mode, scope)
+        if resumable:
+            print(f"\n[Engine] 检测到上次未完成的 {mode.value} 执行")
+            print(f"  Run ID: {resumable['run_id']}")
+            print(f"  已完成 Phase: {len(resumable.get('completed_phases', []))} / 8")
+            print(f"  当前 Phase: {resumable.get('current_phase', '?')}")
+            print(f"  上次执行: {resumable.get('expires_at', '?')}")
+            print(f"\n  使用 --resume 参数从断点继续，或直接运行重新开始")
+
+            # 默认提示而不强制中断（用户可以选择）
+            if user_overrides and user_overrides.get('resume'):
+                run_id = resumable['run_id']
+                print(f"[Engine] 从 Phase {resumable['current_phase']} 继续执行")
+                return self._resume_from_checkpoint(resumable)
+
         run_id = self._generate_run_id()
 
         # 步骤 1: 预估 + 用户确认
@@ -141,6 +157,14 @@ class Engine:
             result = self._run_l4(run_id, impact_result)
         else:
             raise NotImplementedError(f"{mode.value} 未实现")
+
+        # 步骤 6: 每次执行后自动更新基线
+        self.state_manager.update_baseline_after_run(
+            run_id=run_id,
+            mode=mode.value,
+            selection=selection,
+            execution=result.get('execution', {}) if isinstance(result, dict) else {},
+        )
 
         return result
 
@@ -699,3 +723,66 @@ class Engine:
             candidates.insert(0, config_path)
 
         return [p for p in candidates if Path(p).exists()]
+
+    def _check_resumable_checkpoint(self, mode: Mode, scope: str) -> Optional[Dict]:
+        """
+        检查是否有可恢复的 checkpoint
+
+        返回：如果有可恢复的，返回 checkpoint 信息；否则返回 None
+        """
+        last_run = self.state_manager.load_last_run()
+        if not last_run or 'checkpoint' not in last_run:
+            return None
+
+        checkpoint = last_run['checkpoint']
+
+        # 检查是否已过期
+        expires_at = datetime.fromisoformat(checkpoint.get('expires_at', ''))
+        if datetime.now() > expires_at:
+            print("[Engine] 检测到过期的 checkpoint，已忽略")
+            return None
+
+        # 检查模式和 scope 是否匹配
+        if last_run.get('mode') != mode.value or last_run.get('scope') != scope:
+            return None
+
+        # 检查 git 状态是否变化
+        current_head = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], text=True
+        ).strip()
+        if current_head != checkpoint.get('git_head'):
+            print("[Engine] Git HEAD 已变化，checkpoint 不再有效")
+            return None
+
+        # 可恢复
+        return {
+            'run_id': last_run['run_id'],
+            'current_phase': checkpoint.get('current_phase', 1),
+            'completed_phases': checkpoint.get('completed_phases', []),
+            'expires_at': checkpoint.get('expires_at'),
+        }
+
+    def _resume_from_checkpoint(self, resumable: Dict) -> Dict:
+        """
+        从 checkpoint 恢复执行
+
+        TODO: Phase 2 实现
+        当前只是框架，实际需要根据 current_phase 跳转到对应阶段
+        """
+        run_id = resumable['run_id']
+        current_phase = resumable['current_phase']
+
+        print(f"[Engine] 从 Phase {current_phase} 继续执行 (run_id={run_id})")
+
+        # TODO: 实现实际的断点恢复逻辑
+        # 需要根据 current_phase 判断从哪个阶段开始
+        # 例如：
+        # - Phase 1: Designer 已完成 → 跳过
+        # - Phase 2: Executor 从断点继续
+        # - Phase 3-8: 依次执行
+
+        return {
+            'status': 'resumed',
+            'run_id': run_id,
+            'message': f'从 Phase {current_phase} 恢复执行（实现中）',
+        }
