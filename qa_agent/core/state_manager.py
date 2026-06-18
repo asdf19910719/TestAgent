@@ -194,6 +194,25 @@ class StateManager:
 
         (self.run_dir / "selection.md").write_text(content, encoding='utf-8')
 
+    def save_coverage_warning(self, reason: str, existing_tests: list) -> None:
+        """
+        保存覆盖不足警告（L3 两阶段 prepare 时使用）
+
+        写入 qa/run/coverage_warning.json，让 Gatekeeper 能看到。
+        """
+        warning = {
+            'timestamp': datetime.now().isoformat(),
+            'reason': reason,
+            'existing_test_files': len(existing_tests),
+            'by_level': {},
+        }
+        for t in existing_tests:
+            level = t.get('level', 'unknown')
+            warning['by_level'][level] = warning['by_level'].get(level, 0) + 1
+
+        self._atomic_write_json(self.run_dir / "coverage_warning.json", warning)
+        print(f"[StateManager] 覆盖警告已保存: {self.run_dir / 'coverage_warning.json'}")
+
     def _atomic_write_json(self, path: Path, data: Dict[str, Any]) -> None:
         """
         原子写 JSON（先写临时文件再 rename）

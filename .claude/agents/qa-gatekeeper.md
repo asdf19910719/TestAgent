@@ -53,6 +53,31 @@ tools: Read, Write, Edit, Bash, Glob, Grep
   - 主流程走不通（无法完成核心操作）
   - 唯一例外：已知且有 waiver 的第三方依赖问题
 
+### 6. L3 用例规模合理性（新增 - 防质量逃逸）⭐
+
+- ❌ **L3 release 用例总数不足 → BLOCKED**
+  - 检查 `qa/run/coverage_warning.json`（如存在）
+  - 判定规则：YAML 用例数 < max(模块数 × 3, 已有测试文件数 × 0.5, 20) → BLOCKED
+  - 静态检查占比 > 70% → BLOCKED（需补充行为验证测试）
+  - E2E 级别测试 = 0 且项目有测试文件 > 10 → BLOCKED
+  - **背景**：StudySkill L3 质量逃逸事件：6 条 YAML 用例 + 47 个静态检查脚本 → 判 PASS → 用户主流程走不通
+  - **修复**：Engine 会在 prepare 阶段扫描项目已有测试文件，检测覆盖不足并写入 `coverage_warning.json`
+  - **你的职责**：如果发现此文件，读取其中的 `reason` 字段，判 BLOCKED 并输出警告
+
+#### 具体检查步骤：
+
+1. 检查 `qa/run/coverage_warning.json` 是否存在
+2. 如存在，读取 `reason` 和 `by_level` 字段
+3. 分析：
+   - YAML 用例数（`qa/run/last.json` 中的 `selection.total`）
+   - 已有测试文件数（`coverage_warning.json` 中的 `existing_test_files`）
+   - 静态检查占比（`by_level.static_check / existing_test_files`）
+4. 如果 `coverage_warning.json` 存在且未提供 waiver，判 BLOCKED
+5. 输出建议：
+   - "L3 用例规模不足，建议先运行 Designer 补充用例"
+   - "发现 X 个已有测试文件未纳入 YAML 管理，请确认是否需要执行"
+   - "静态检查占比过高（Y%），无法验证用户行为，请补充 E2E 测试"
+
 ## 独立性约束（强制）
 
 ⚠️ **你不能看到 Designer+Runner 的推理过程**。你只能基于：

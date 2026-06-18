@@ -2,6 +2,7 @@
 Engine: 模式路由核心
 """
 
+from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -9,6 +10,7 @@ from .types import Mode
 from .config import load_config
 from .state_manager import StateManager
 from .impact_analysis import ImpactAnalyzer
+from .test_discovery import discover_tests, check_l3_coverage_adequacy
 
 
 class Engine:
@@ -53,8 +55,26 @@ class Engine:
         if not self._confirm_execution(mode, estimate):
             return {'status': 'cancelled', 'message': '用户取消执行'}
 
-        # 步骤 2: 影响面分析（暂时用 stub 用例列表）
-        all_cases = self._load_all_cases()  # stub
+        # 步骤 2: 影响面分析
+        # L3 特殊处理：两阶段 prepare
+        all_cases = self._load_all_cases()
+
+        if mode == Mode.L3:
+            # L3 Phase A: 检查用例库是否充分
+            existing_tests = discover_tests(Path('.'))
+            adequate, reason = check_l3_coverage_adequacy(
+                project_dir=Path('.'),
+                yaml_cases_count=len(all_cases),
+                tests=existing_tests,
+            )
+            if not adequate:
+                print(f"[Engine] L3 覆盖不足: {reason}")
+                print(f"[Engine] 发现项目已有 {len(existing_tests)} 个测试文件，"
+                      f"但 YAML 用例仅 {len(all_cases)} 条")
+                print(f"[Engine] 建议：先运行 Designer 补充用例，或确认 waiver")
+                # 记录到 selection 中，让 Gatekeeper 能看到
+                self.state_manager.save_coverage_warning(reason, existing_tests)
+
         impact_result = self.impact_analyzer.analyze(mode, all_cases)
 
         # 步骤 3: 应用用户覆盖
