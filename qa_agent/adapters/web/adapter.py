@@ -84,9 +84,41 @@ class WebAdapter:
 
     def generate(self, case: TestCase) -> str:
         """
-        生成测试脚本
-        Phase 4 简化：生成骨架，Phase 5/6 用 LLM 生成完整实现
+        生成测试脚本（自动选择普通骨架或 E2E 增强器）
+
+        根据配置和用例级别自动决策：
+        1. webui.e2e_enhancer.enabled = 'auto' 且 level in trigger_levels → E2E 增强
+        2. webui.e2e_enhancer.enabled = 'always' → E2E 增强
+        3. 其他 → 普通骨架生成
         """
+        # 检查是否应该使用 E2E 增强器
+        webui_config = self.config.get('webui', {})
+        enhancer_config = webui_config.get('e2e_enhancer', {})
+        enabled = enhancer_config.get('enabled', 'auto')
+        trigger_levels = enhancer_config.get('trigger_levels', ['system', 'acceptance'])
+
+        should_enhance = False
+        if enabled == 'always':
+            should_enhance = True
+        elif enabled == 'auto' and case.level.value in trigger_levels:
+            should_enhance = True
+
+        # 如果需要增强且有目标 URL
+        target_url = enhancer_config.get('target_url')
+        credentials = enhancer_config.get('credentials')
+
+        if should_enhance and target_url:
+            print(f"[WebAdapter] 自动启用 E2E 增强器（level={case.level.value}）")
+            try:
+                return self.generate_with_e2e_enhancement(case, target_url, credentials)
+            except Exception as e:
+                fallback = enhancer_config.get('fallback_on_login_failure', True)
+                if fallback:
+                    print(f"[WebAdapter] E2E 增强失败，回退到普通骨架: {e}")
+                else:
+                    raise
+
+        # 降级：普通骨架生成
         # 确定框架和路径
         if case.level.value in ('unit', 'integration'):
             framework = 'vitest'

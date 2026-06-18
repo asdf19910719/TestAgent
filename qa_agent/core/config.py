@@ -44,6 +44,16 @@ DEFAULT_CONFIG = {
         'gatekeeper_skip_llm_for': ['L0', 'L4'],
         'gatekeeper_cache': True
     },
+    'webui': {
+        # WebUI E2E 增强器配置（移植自 oec-infra webui-test-unified）
+        'e2e_enhancer': {
+            'enabled': 'auto',  # auto=自动检测 | always=强制启用 | never=禁用
+            'trigger_levels': ['system', 'acceptance'],  # 哪些级别自动启用
+            'target_url': None,  # 默认目标 URL（可覆盖）
+            'credentials': None,  # 默认登录凭据 {'username': '...', 'password': '...'}
+            'fallback_on_login_failure': True,  # 登录失败时回退到普通骨架
+        }
+    },
     'gitnexus': {
         # MCP 工具前缀（列表，按优先级依次尝试）
         'mcp_tool_prefixes': ['mcp__gitnexus', 'mcp__gitnexus22'],
