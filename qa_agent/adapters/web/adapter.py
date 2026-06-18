@@ -1,5 +1,5 @@
 """
-Web Adapter: Web 前端项目适配器
+Web Adapter: Web 前端项目适配器（集成 webui-test-unified）
 """
 
 import json
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from ...core.types import ProjectFingerprint, TestCase, RunResult
+from .e2e_enhancer import WebUIE2EEnhancer
 
 
 class WebAdapter:
@@ -16,8 +17,10 @@ class WebAdapter:
     支持：Playwright（E2E）、Vitest/Jest（单元/集成）
     """
 
-    def __init__(self, cwd: Path = Path('.')):
+    def __init__(self, cwd: Path = Path('.'), config: Optional[Dict[str, Any]] = None):
         self.cwd = cwd
+        self.config = config or {}
+        self.e2e_enhancer = WebUIE2EEnhancer(cwd, self.config)
 
     def detect(self) -> ProjectFingerprint:
         """
@@ -167,6 +170,43 @@ test('{case.id}: {case.title}', async ({{ page }}) => {{
   await expect(page).toHaveTitle(/.*/);  // <-- 占位断言，必须删除
 }});
 """
+
+    def generate_with_e2e_enhancement(self, case: TestCase, target_url: str, credentials: Optional[Dict] = None) -> str:
+        """
+        使用 WebUI E2E 增强器生成脚本（基于真实 DOM 元素）
+
+        Args:
+            case: 测试用例
+            target_url: 目标 URL
+            credentials: 登录凭据（可选）
+
+        Returns:
+            生成的测试脚本路径
+        """
+        # 1. 登录 + 探索
+        print(f"[WebAdapter] E2E 增强：登录并探索页面")
+        explore_result = self.e2e_enhancer.login_and_explore(target_url, credentials)
+
+        if not explore_result.get('login_success'):
+            print(f"[WebAdapter] 登录失败，降级为普通骨架生成")
+            return self.generate(case)
+
+        # 2. 基于真实元素生成脚本
+        print(f"[WebAdapter] E2E 增强：基于 {len(explore_result.get('page_elements', []))} 个元素生成脚本")
+        script_content = self.e2e_enhancer.generate_script_with_elements(
+            case,
+            explore_result.get('page_elements', [])
+        )
+
+        # 3. 写入文件
+        test_dir = self.cwd / 'e2e'
+        test_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{case.feature_id.lower().replace('-', '_')}_{case.id.lower()}.spec.ts"
+        filepath = test_dir / filename
+        filepath.write_text(script_content, encoding='utf-8')
+
+        print(f"[WebAdapter] E2E 增强脚本已生成: {filepath}")
+        return str(filepath.relative_to(self.cwd))
 
     def index_targets(self) -> Dict[str, Any]:
         """
