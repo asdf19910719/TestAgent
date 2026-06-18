@@ -565,6 +565,43 @@ PASS / CONDITIONAL PASS / FAIL / BLOCKED
 }
 ```
 
+### L3 PASS 后：自动保存基线（强制）⭐
+
+**如果模式是 L3 且判定为 PASS 或 CONDITIONAL PASS，必须保存基线。**
+
+这是 StudySkill L3 的 bug 修复：上一轮 L3 Gatekeeper 判了 PASS 但没保存 baseline，导致下一轮被当作"首次 L3"。
+
+```python
+# 判定 PASS/CONDITIONAL PASS 后执行（L3 专用）
+from qa_agent.core.state_manager import StateManager
+from datetime import datetime
+import json
+
+sm = StateManager()
+last_run = sm.load_last_run()
+
+if last_run and last_run.get('mode') == 'L3':
+    verdict = last_run.get('gatekeeper_verdict', {}).get('verdict', '')
+    if verdict in ('PASS', 'CONDITIONAL PASS'):
+        # 保存基线
+        selection = last_run.get('selection', {})
+        sm.save_baseline({
+            'established_at': datetime.now().isoformat(),
+            'established_by': last_run.get('run_id', 'unknown'),
+            'total_cases': selection.get('total', 0),
+            'by_level': selection.get('by_level', {}),
+            'by_priority': selection.get('by_priority', {}),
+            'pass_rate': last_run.get('execution', {}).get('pass_rate', ''),
+            'target_coverage': '主流程全覆盖 + 异常/边界 + 容错',
+        })
+        print(f"[Gatekeeper] L3 基线已保存: {selection.get('total', 0)} 条用例")
+```
+
+**检查清单**：
+- ✅ 判定为 PASS/CONDITIONAL PASS → 保存基线
+- ❌ 判定为 FAIL/BLOCKED → 不保存基线
+- ✅ 保存后打印确认日志
+
 ## 判定不允许做的事
 
 1. ❌ 修改 `qa/run/last.json` 的 `execution` 字段（你只能写 `gatekeeper_verdict`）

@@ -130,7 +130,9 @@ def discover_requirements(config: Dict[str, Any], cwd: Path = Path('.')) -> Dict
         return {**found, 'source': 'convention'}
 
     # 优先级 3: 反向梳理兜底
-    print("[需求发现] 未找到需求文档，将在首次执行时触发反向梳理")
+    # 注意：这不意味着最终没有文档——调用者可能通过 --docs-path 或其他机制后续提供
+    print("[需求发现] 约定路径未发现需求文档（docs/ ai-docs/ .bmad/ 均无匹配）")
+    print("[需求发现] 将依赖 --docs-path 参数或反向梳理模式")
     return {
         'primary': None,
         'acceptance': None,
