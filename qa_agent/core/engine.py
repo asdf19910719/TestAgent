@@ -204,6 +204,21 @@ class Engine:
         print(f"[Engine] 已加载 {len(cases)} 条用例")
         return cases
 
+    def _load_designed_cases_from_disk(self):
+        """
+        从磁盘加载已设计的用例（断点恢复 Phase 1 跳过时使用）
+
+        当 Designer Phase 已完成，用例已保存在 qa/cases/ 中，
+        直接从磁盘加载即可，不需要重新生成。
+        """
+        cases = self._load_all_cases()
+        if not cases:
+            print("[Engine] 警告：qa/cases/ 为空，但 Designer Phase 标记已完成")
+            print("[Engine] 可能需要 --force-new 重新开始")
+        else:
+            print(f"[Engine] 从磁盘加载已设计的 {len(cases)} 条用例")
+        return cases
+
     def _apply_user_overrides(
         self,
         impact_result: Dict[str, Any],
@@ -493,14 +508,27 @@ class Engine:
             'execution': execution_result
         }
 
-    def _run_l3(self, run_id: str, impact_result: Dict[str, Any]) -> Dict[str, Any]:
-        """L3 Release 模式完整实现（Phase 6）"""
+    def _run_l3(self, run_id: str, impact_result: Dict[str, Any],
+                skip_phases: Optional[List[int]] = None,
+                cached_results: Optional[Dict[int, Dict]] = None) -> Dict[str, Any]:
+        """
+        L3 Release 模式完整实现（Phase 6）
+
+        Args:
+            skip_phases: 要跳过的 Phase 编号列表（断点恢复时使用）
+            cached_results: 已完成 Phase 的缓存结果（断点恢复时使用）
+        """
         from .designer_runner import DesignerRunner
         from .gatekeeper import Gatekeeper
         from .requirement_discovery import discover_requirements, handle_missing_requirements
         import subprocess
 
+        skip_phases = skip_phases or []
+        cached_results = cached_results or {}
+
         print("\n[Engine] 启动 L3 Release 流程...")
+        if skip_phases:
+            print(f"[Engine] 跳过已完成的 Phase: {skip_phases}")
 
         # L3 强制要求需求文档
         requirements_info = discover_requirements(self.config)
@@ -518,12 +546,19 @@ class Engine:
         designer = DesignerRunner(self.config)
         selected_cases = impact_result['selected_cases']
 
-        # Phase 1: Designer 生成用例
-        print("[L3] Phase 1/8: Designer 设计用例...")
-        designed_cases = designer.design_cases(Mode.L3, run_id, requirements_content, selected_cases)
+        git_head = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], capture_output=True, text=True
+        ).stdout.strip()
 
-        git_head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
-        self.state_manager.save_checkpoint(run_id, 1, 'designer', {'duration_s': 10}, git_head, 'diff_hash')
+        # Phase 1: Designer 生成用例
+        if 1 in skip_phases:
+            print("[L3] Phase 1/8: Designer 设计用例... [已完成，跳过]")
+            # 从缓存或磁盘加载已有用例
+            designed_cases = self._load_designed_cases_from_disk()
+        else:
+            print("[L3] Phase 1/8: Designer 设计用例...")
+            designed_cases = designer.design_cases(Mode.L3, run_id, requirements_content, selected_cases)
+            self.state_manager.save_checkpoint(run_id, 1, 'designer', {'duration_s': 10}, git_head, 'diff_hash')
 
         # Phase 2-5: 分层执行测试
         phases = [
@@ -535,6 +570,14 @@ class Engine:
 
         all_failures = []
         for phase_num, phase_name, phase_cases in phases:
+            if phase_num in skip_phases:
+                print(f"[L3] Phase {phase_num}/8: {phase_name}... [已完成，跳过]")
+                # 从缓存中恢复失败记录
+                if phase_num in cached_results:
+                    cached_failures = cached_results[phase_num].get('failures', [])
+                    all_failures.extend(cached_failures)
+                continue
+
             if not phase_cases:
                 continue
 
@@ -542,31 +585,43 @@ class Engine:
             scripts = designer.generate_scripts(phase_cases, adapter=self.adapter)
             result = designer.execute_tests(phase_cases, Mode.L3, adapter=self.adapter)
 
-            all_failures.extend([
+            phase_failures = [
                 {'case_id': c['case_id'], 'bug_id': f"BUG-{len(all_failures)+i+1:03d}",
                  'failure_kind': 'test', 'message': c.get('error', '')}
                 for i, c in enumerate(result.get('cases', []))
                 if c.get('status') == 'fail'
-            ])
+            ]
+            all_failures.extend(phase_failures)
 
-            self.state_manager.save_checkpoint(run_id, phase_num, phase_name,
-                                                {'total': result['total'], 'pass': result['pass'],
-                                                 'fail': result['fail'], 'duration_s': result['total'] * 0.1},
+            self.state_manager.save_checkpoint(
+                run_id, phase_num, phase_name,
+                {'total': result['total'], 'pass': result['pass'],
+                 'fail': result['fail'], 'duration_s': result['total'] * 0.1,
+                 'failures': phase_failures},
+                git_head, 'diff_hash'
+            )
+
+        # Phase 6: 非功能测试
+        if 6 in skip_phases:
+            print("[L3] Phase 6/8: 非功能测试... [已完成，跳过]")
+            nonfunctional_result = cached_results.get(6, {'pass': True})
+        else:
+            print("[L3] Phase 6/8: 非功能测试...")
+            nonfunctional_result = self._run_nonfunctional_tests(run_id)
+            self.state_manager.save_checkpoint(run_id, 6, 'nonfunctional',
+                                                {'pass': nonfunctional_result.get('pass', True), 'duration_s': 5},
                                                 git_head, 'diff_hash')
 
-        # Phase 6: 非功能测试（Phase 6.2 完整实现）
-        print("[L3] Phase 6/8: 非功能测试...")
-        nonfunctional_result = self._run_nonfunctional_tests(run_id)
-        self.state_manager.save_checkpoint(run_id, 6, 'nonfunctional',
-                                            {'pass': nonfunctional_result.get('pass', True), 'duration_s': 5},
-                                            git_head, 'diff_hash')
-
-        # Phase 7: Mutation 抽样（Phase 6.2）
-        print("[L3] Phase 7/8: Mutation 抽样...")
-        mutation_result = self._run_mutation_sampling(run_id)
-        self.state_manager.save_checkpoint(run_id, 7, 'mutation',
-                                            {'score': mutation_result.get('score', 0.0), 'duration_s': 10},
-                                            git_head, 'diff_hash')
+        # Phase 7: Mutation 抽样
+        if 7 in skip_phases:
+            print("[L3] Phase 7/8: Mutation 抽样... [已完成，跳过]")
+            mutation_result = cached_results.get(7, {'score': 0.0})
+        else:
+            print("[L3] Phase 7/8: Mutation 抽样...")
+            mutation_result = self._run_mutation_sampling(run_id)
+            self.state_manager.save_checkpoint(run_id, 7, 'mutation',
+                                                {'score': mutation_result.get('score', 0.0), 'duration_s': 10},
+                                                git_head, 'diff_hash')
 
         # 更新最终执行结果
         total_cases = sum(len(cases) for _, _, cases in phases)
@@ -581,7 +636,6 @@ class Engine:
         gatekeeper = Gatekeeper(self.config)
         last_run = self.state_manager.load_last_run()
 
-        # requirement_ids 独立校验（P0-3）
         inconsistencies = gatekeeper.validate_requirement_ids(designed_cases, requirements_content)
         if inconsistencies:
             print(f"⚠️ 发现 {len(inconsistencies)} 个 requirement_ids 不一致")
@@ -793,12 +847,15 @@ class Engine:
             return self._resume_l3_from_checkpoint(
                 run_id, current_phase, last_run, selection, impact_analysis
             )
+        elif mode in (Mode.L1, Mode.L2, Mode.L4):
+            return self._resume_simple_mode_from_checkpoint(
+                run_id, mode, last_run, selection, impact_analysis
+            )
         else:
-            # L0/L1/L2/L4 目前只有单 phase，不支持断点恢复
             print(f"[Engine] {mode.value} 模式不支持断点恢复，重新执行")
             return {
                 'status': 'not_supported',
-                'message': f'{mode.value} 模式不支持断点恢复（单 phase 执行）',
+                'message': f'{mode.value} 模式不支持断点恢复',
             }
 
     def _resume_l3_from_checkpoint(
@@ -806,42 +863,134 @@ class Engine:
         selection: Dict, impact_analysis: Dict
     ) -> Dict:
         """
-        L3 断点恢复逻辑
+        L3 断点恢复逻辑 — 精确 Phase 跳转 + 结果复用
 
-        L3 的 8 个 Phase：
-        1. Designer 生成用例
-        2. 主流程 E2E
-        3. 完整功能测试
-        4. Integration 测试
-        5. 边界/异常测试
-        6. 非功能测试
-        7. Mutation 测试
-        8. Gatekeeper 判定
-
-        断点恢复：跳过已完成的 Phase，从 current_phase 继续
+        跳过已完成的 Phase，从 current_phase 继续执行。
+        已完成 Phase 的结果从 checkpoint 中恢复（避免重复执行）。
         """
+        completed_phases = last_run.get('checkpoint', {}).get('completed_phases', [])
+        completed_phase_nums = [p['phase'] for p in completed_phases]
+
         print(f"[Engine] L3 断点恢复: 从 Phase {current_phase} 开始")
+        print(f"[Engine] 已完成 Phase: {completed_phase_nums}")
+        print(f"[Engine] 将跳过: Phase {completed_phase_nums}")
 
-        # TODO: 这里需要根据 current_phase 跳转到对应的执行逻辑
-        # 当前简化实现：重新执行整个 L3（但保留用例库）
-        # Phase 2 完整实现时，需要：
-        # 1. 读取已完成 Phase 的结果
-        # 2. 跳过已完成的 Phase
-        # 3. 从 current_phase 继续执行
+        # 从 checkpoint 中提取已完成 Phase 的结果（用于复用）
+        cached_results = {}
+        results_by_phase = last_run.get('execution', {}).get('results_by_phase', {})
+        for p in completed_phases:
+            phase_num = p['phase']
+            phase_name = p['name']
+            # 从 results_by_phase 或 checkpoint 本身获取结果
+            if phase_name in results_by_phase:
+                cached_results[phase_num] = results_by_phase[phase_name]
+            else:
+                # 从 checkpoint 的 completed_phases 中提取
+                cached_results[phase_num] = {
+                    'duration_s': p.get('duration_s', 0),
+                    'failures': [],
+                }
 
-        print("[Engine] 注意: 当前断点恢复会跳过 Designer（保留已有用例库）")
-        print("[Engine] 从主流程 E2E 开始重新执行")
-
-        # 构造 impact_result（模拟影响面分析结果）
+        # 构造 impact_result
         all_cases = self._load_all_cases()
+        case_ids = selection.get('case_ids', [])
+        selected = [c for c in all_cases if c.id in case_ids] if case_ids else all_cases
+
+        impact_result = {
+            'mode': impact_analysis.get('mode', 'full'),
+            'diff_files': impact_analysis.get('diff_files', []),
+            'affected_symbols': impact_analysis.get('affected_symbols', []),
+            'selected_cases': selected,
+        }
+
+        # 调用 _run_l3 并跳过已完成的 Phase
+        result = self._run_l3(
+            run_id,
+            impact_result,
+            skip_phases=completed_phase_nums,
+            cached_results=cached_results,
+        )
+
+        return result
+
+    def _resume_simple_mode_from_checkpoint(
+        self, run_id: str, mode: Mode, last_run: Dict,
+        selection: Dict, impact_analysis: Dict
+    ) -> Dict:
+        """
+        L1/L2/L4 断点恢复逻辑
+
+        这些模式结构简单（Designer → Execute → Gatekeeper），
+        断点恢复策略：
+        - Designer 已完成 → 跳过，直接从 Execute 开始
+        - Execute 已完成 → 直接跑 Gatekeeper
+        """
+        completed_phases = last_run.get('checkpoint', {}).get('completed_phases', [])
+        completed_names = [p['name'] for p in completed_phases]
+
+        print(f"[Engine] {mode.value} 断点恢复: 已完成 {completed_names}")
+
+        all_cases = self._load_all_cases()
+        case_ids = selection.get('case_ids', [])
+        selected = [c for c in all_cases if c.id in case_ids] if case_ids else all_cases
+
         impact_result = {
             'mode': impact_analysis.get('mode', 'diff'),
             'diff_files': impact_analysis.get('diff_files', []),
             'affected_symbols': impact_analysis.get('affected_symbols', []),
-            'selected_cases': [c for c in all_cases if c.id in selection.get('case_ids', [])],
+            'selected_cases': selected,
         }
 
-        # 从主流程 E2E 阶段开始执行（跳过 Designer）
-        result = self._run_l3(run_id, impact_result, skip_designer=True)
+        if 'designer' in completed_names:
+            print(f"[Engine] Designer 已完成，跳过用例生成")
 
-        return result
+            if 'executor' in completed_names or 'runner' in completed_names:
+                print(f"[Engine] 测试执行已完成，直接进入 Gatekeeper")
+                return self._run_gatekeeper_only(run_id, mode, last_run)
+            else:
+                print(f"[Engine] 从测试执行阶段继续")
+                if mode == Mode.L1:
+                    return self._run_l1(run_id, impact_result)
+                elif mode == Mode.L2:
+                    return self._run_l2(run_id, impact_result)
+                elif mode == Mode.L4:
+                    return self._run_l4(run_id, impact_result)
+        else:
+            print(f"[Engine] Designer 未完成，重新开始")
+            if mode == Mode.L1:
+                return self._run_l1(run_id, impact_result)
+            elif mode == Mode.L2:
+                return self._run_l2(run_id, impact_result)
+            elif mode == Mode.L4:
+                return self._run_l4(run_id, impact_result)
+
+        return {'status': 'error', 'message': f'{mode.value} 恢复失败'}
+
+    def _run_gatekeeper_only(self, run_id: str, mode: Mode, last_run: Dict) -> Dict:
+        """仅执行 Gatekeeper 判定（断点恢复时使用）"""
+        from .gatekeeper import Gatekeeper
+        from .requirement_discovery import discover_requirements
+
+        print(f"[Engine] 仅执行 Gatekeeper 判定 ({mode.value})")
+
+        requirements_info = discover_requirements(self.config)
+        requirements_content = ""
+        if requirements_info.get('primary'):
+            try:
+                requirements_content = Path(requirements_info['primary']).read_text(encoding='utf-8')
+            except Exception:
+                pass
+
+        designed_cases = self._load_all_cases()
+
+        gatekeeper = Gatekeeper(self.config)
+        verdict = gatekeeper.judge(run_id, mode, last_run, requirements_content, designed_cases, None)
+        gatekeeper.write_report(verdict, mode, last_run, Path('qa/final_test_report.md'))
+
+        print(f"\n✅ {mode.value} Gatekeeper 判定: {verdict['verdict']}")
+
+        return {
+            'status': 'completed',
+            'verdict': verdict['verdict'],
+            'execution': last_run.get('execution', {}),
+        }
