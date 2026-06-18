@@ -258,6 +258,96 @@ python -m qa_agent.cli.main scaffold --case <case_id>
 
 ---
 
+### 已有测试文件自动索引（强制 - L2/L3）⭐
+
+**在生成新用例之前，必须先扫描项目中已有的测试文件并纳入管理。**
+
+这是 StudySkill L3 质量逃逸的根因之一：47 个 verify-v*.mjs 在项目中存在，但不在 `qa/cases/*.yml` 中管理，导致 Gatekeeper 无法评估真实覆盖率。
+
+#### 执行步骤
+
+1. **扫描已有测试文件**：
+
+```bash
+# 搜索项目中的测试文件
+Glob **/*.spec.ts
+Glob **/*.spec.mjs
+Glob **/*.test.ts
+Glob **/test_*.py
+Glob **/verify-*.mjs
+```
+
+2. **分级每个文件**（读取内容判断级别）：
+
+| 文件内容特征 | 级别 | 验证力度 |
+|---|---|---|
+| 含 `playwright` / `page.click` / `browser.launch` | `e2e` | 高 |
+| 含 `describe` + `expect` / `assert` + 函数调用 | `unit` | 中 |
+| 仅含 `fs.existsSync` / `.includes(` / 无运行时逻辑 | `static_check` | 极低 |
+
+3. **为每个未管理的测试文件创建 YAML 用例**：
+
+```yaml
+# qa/cases/discovered/TC-DISC-001.yml
+id: TC-DISC-001
+title: "[已有] verify-v33.mjs - 概念热身组件文件检查"
+state: active
+feature_id: F-CONCEPT-WARMUP
+level: unit          # 注意：static_check 级别归为 unit 但标注 purpose
+purpose: regression
+priority: P2         # 静态检查默认 P2（不影响 P0/P1 判定）
+automation:
+  status: implemented
+  framework: node
+  file: webapp/scripts/verify-v33.mjs
+  test_id: verify_v33
+notes: "自动发现的已有测试文件（static_check 级别，仅验证文件/符号存在）"
+```
+
+4. **为 E2E 级别文件创建高优先级 YAML**：
+
+```yaml
+# qa/cases/discovered/TC-DISC-020.yml
+id: TC-DISC-020
+title: "[已有] verify-v39-mobile-ui.spec.mjs - 移动端 UI 交互验证"
+state: active
+feature_id: F-MOBILE-UI
+level: system        # E2E 级别 → system
+purpose: functional
+priority: P0         # E2E 测试 = P0（主流程验证）
+automation:
+  status: implemented
+  framework: playwright
+  file: webapp/scripts/verify-v39-mobile-ui.spec.mjs
+  test_id: verify_v39_mobile_ui
+notes: "自动发现的已有 E2E 测试（Playwright，验证真实用户交互）"
+```
+
+#### 关键规则
+
+- ✅ **所有 E2E 级别文件必须创建 P0/P1 YAML 用例**（确保 Gatekeeper 能约束）
+- ✅ **static_check 级别文件创建 P2 YAML**（纳入统计但不阻塞发版）
+- ✅ **用例 YAML 的 `automation.file` 指向已有文件**（不需要重新生成脚本）
+- ❌ **禁止忽略已有测试文件**（"只管 YAML 用例"是质量逃逸的根因）
+- ❌ **禁止把 static_check 当作 E2E 看待**（文件存在 ≠ 功能正常）
+
+#### 为什么要索引？
+
+```
+不索引时：
+  项目有 47 个测试文件（33 static + 8 unit + 6 e2e）
+  YAML 只有 6 条用例
+  Gatekeeper 只看 6 条 → 全过 → PASS
+  但 6 个 E2E 全部 SKIP → 用户主流程走不通
+
+索引后：
+  47 个文件全部创建 YAML 用例（6 个 P0 E2E + 8 个 P1 unit + 33 个 P2 static）
+  Gatekeeper 看到 6 个 P0 E2E 未通过 → BLOCKED
+  必须先跑通主流程才能继续
+```
+
+---
+
 **生成步骤详细流程**：
 
 1. **扫描项目结构**，建立功能模块清单
@@ -328,10 +418,73 @@ mcp__gitnexus / mcp__gitnexus22 均不可用。
 
 ### L3 Release 流程
 
-最完整流程。额外：
+最完整流程。**执行顺序必须是：先主流程，再扩展覆盖。**
+
+#### 第 1 步（强制）：主流程验证
+
+**在做任何其他事之前，先回答一个问题：用户能走通核心流程吗？**
+
+1. 从需求文档提取主流程清单（每个用户故事的正常完成路径）
+2. 每条主流程 = 1 个 E2E 测试用例
+3. **先执行这些主流程 E2E**
+4. **如果主流程 E2E 有任何失败 → 立即报 FAIL，不继续后续步骤**
+
+```
+示例（学习类 App）：
+主流程清单：
+  1. 登录 → 进入首页 ← 必须先通过
+  2. 选课 → 开始学习 → 完成 ← 必须先通过
+  3. 做练习 → 提交答案 → 查看解析 ← 必须先通过
+  4. 查看进度 → 导出报告 ← 必须先通过
+
+如果第 2 条失败 → 结论：FAIL（核心功能不可用）
+不要继续跑 200 条边界用例然后报"98% 通过"
+```
+
+#### 第 2 步：已有测试扫描与索引
+
+**扫描项目中所有已有测试文件，纳入覆盖评估。**
+
+```bash
+# 执行测试发现
+python -m qa_agent.cli.main discover-tests
+```
+
+或者手动执行：
+
+```python
+from qa_agent.core.test_discovery import discover_tests, compute_coverage_stats
+tests = discover_tests(Path('.'))
+stats = compute_coverage_stats(tests)
+```
+
+关键检查：
+- 已有测试文件中有多少是 static_check（仅文件存在/符号检查）？
+- 有多少是真正的 E2E（启动浏览器/操作 DOM）？
+- 静态检查占比 > 70% → 需要补充行为验证测试
+- **静态检查通过 ≠ 功能正常**，`fs.existsSync("file.tsx")` 不能证明组件能渲染
+
+#### 第 3 步：完整覆盖
+
 - 校验需求追踪矩阵 100% 覆盖（每个需求至少 1 个 P0/P1 用例）
 - 按 `.qa-agent.yml` 配置启用非功能测试
 - 8 phase 检查点逐步执行（每个 phase 完成后由 Python 自动写检查点）
+
+#### L3 判定原则
+
+```
+通过条件（必须全部满足）：
+1. ✅ 所有主流程 E2E 通过
+2. ✅ YAML 用例覆盖充分（≥ max(模块数×3, 测试文件数×0.5, 20)）
+3. ✅ 静态检查占比 < 70%
+4. ✅ 无 P0/P1 用例 SKIP/BLOCKED
+5. ✅ 无未分析的 E2E 失败
+
+禁止的判定：
+- ❌ "47 个 verify 脚本通过 = 覆盖充分"（静态检查不等于行为验证）
+- ❌ "6 条 YAML 用例全过 = L3 PASS"（用例规模不足）
+- ❌ "E2E 超时 = 环境问题 = 可跳过"（必须分析+重试）
+```
 
 ### L4 Bugfix 流程
 
