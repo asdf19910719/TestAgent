@@ -184,4 +184,30 @@ class DesignerRunner:
 
         for bug in bugs:
             filepath = BugSerializer.save(bug, qa_dir)
-            print(f"[DesignerRunner] 已保存 {bug.id} → {filepath}")
+
+    def repair_test_case(
+        self,
+        case: TestCase,
+        failure_message: str,
+        adapter: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        修复失败的测试用例
+
+        Args:
+            case: 失败的测试用例
+            failure_message: 失败原因
+            adapter: 适配器（用于特定框架的修复）
+
+        Returns:
+            {'status': 'repaired' | 'failed', 'message': ...}
+        """
+        print(f"[Designer] 修复用例 {case.id}...")
+        print(f"  失败原因: {failure_message[:100]}")
+
+        # TODO: Phase 2 实现智能修复
+        # 当前简化版：只标记为需要修复
+        return {
+            'status': 'failed',
+            'message': 'repair_test_case 尚未实现（Phase 2）',
+        }

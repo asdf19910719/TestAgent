@@ -646,8 +646,27 @@ class Engine:
         from pathlib import Path
         gatekeeper.write_report(verdict, Mode.L3, last_run, Path('qa/final_test_report.md'))
 
-        print(f"\n✅ L3 完成: {verdict['verdict']}")
+        print(f"\n✅ L3 初步判定: {verdict['verdict']}")
         print(f"   耗时: {total_cases * 0.15:.1f}s")
+
+        # CONDITIONAL PASS → 自动修复循环（遵守 CLAUDE.md 持久性规则）
+        if verdict['verdict'] == 'CONDITIONAL PASS':
+            print(f"\n[Engine] 检测到 CONDITIONAL PASS，进入自动修复循环")
+            print(f"[Engine] 失败用例数: {len(all_failures)}")
+
+            from .engine_repair import repair_loop_l3
+            verdict, all_failures = repair_loop_l3(
+                engine=self,
+                run_id=run_id,
+                designed_cases=designed_cases,
+                all_failures=all_failures,
+                requirements_content=requirements_content,
+                last_run=last_run,
+                max_iterations=3,
+            )
+
+            # 更新最终 verdict
+            gatekeeper.write_report(verdict, Mode.L3, last_run, Path('qa/final_test_report.md'))
 
         return {
             'status': 'completed',
