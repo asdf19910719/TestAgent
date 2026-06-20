@@ -1,0 +1,18 @@
+{
+  "name": "TestAgent",
+  "description": "AI 驱动的端到端测试智能体 — 自动生成测试用例、执行测试、判定质量门",
+  "version": "3.0.0",
+  "agents": [
+    "qa-test-engineer",
+    "qa-gatekeeper"
+  ],
+  "commands": [
+    "qa"
+  ],
+  "features": [
+    "baseline-management",
+    "checkpoint-resume",
+    "repair-loop",
+    "requirement-discovery"
+  ]
+}
