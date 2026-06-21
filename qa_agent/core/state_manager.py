@@ -388,3 +388,164 @@ class StateManager:
             return True
 
         return False
+
+    def finalize_after_manual_repair(
+        self,
+        verdict: str,
+        verdict_reason: str,
+        remaining_failures: list = None,
+        fixes_applied: Dict[str, Any] = None,
+        pass_rate: str = '',
+    ) -> None:
+        """
+        手动修复完成后的状态回写助手
+
+        修复完成后必须调用此方法，确保 last.json + baseline.json + history.jsonl 一致。
+
+        Args:
+            verdict: 'PASS' | 'CONDITIONAL PASS' | 'FAIL'
+            verdict_reason: 判定原因
+            remaining_failures: 修复后剩余的失败列表
+            fixes_applied: 修复内容字典
+            pass_rate: 通过率字符串
+
+        使用示例：
+            sm = StateManager()
+            sm.finalize_after_manual_repair(
+                verdict='PASS',
+                verdict_reason='经过 3 轮手动修复，全部用例通过',
+                remaining_failures=[],
+                fixes_applied={'选择器修复': '更新 6 个 helper'},
+                pass_rate='39/40 (97.5%)',
+            )
+        """
+        last_run = self.load_last_run()
+        if not last_run:
+            print("[StateManager] 警告：last.json 不存在，无法 finalize")
+            return
+
+        now = datetime.now().isoformat()
+        run_id = last_run.get('run_id', 'unknown')
+        mode = last_run.get('mode', 'unknown')
+
+        # 1. 更新 last.json
+        last_run['status'] = 'completed'
+        last_run['execution']['end_time'] = now
+
+        # 计算 duration
+        try:
+            start = datetime.fromisoformat(last_run['execution']['start_time'])
+            duration = (datetime.now() - start).total_seconds()
+            last_run['execution']['duration_seconds'] = duration
+        except Exception:
+            pass
+
+        if remaining_failures is not None:
+            last_run['execution']['failures'] = remaining_failures
+        if pass_rate:
+            last_run['execution']['pass_rate'] = pass_rate
+
+        # 更新 gatekeeper_verdict
+        last_run['gatekeeper_verdict'] = {
+            **(last_run.get('gatekeeper_verdict') or {}),
+            'verdict': verdict,
+            'reason': verdict_reason,
+            'judged_at': now,
+        }
+
+        self._atomic_write_json(self.run_dir / 'last.json', last_run)
+        print(f"[StateManager] last.json 已更新: status=completed, verdict={verdict}")
+
+        # 2. 更新 baseline.json
+        selection = last_run.get('selection', {})
+        baseline_update = {
+            'updated_at': now,
+            'updated_by': run_id,
+            'mode': mode,
+            'total_cases': selection.get('total', 0),
+            'by_level': selection.get('by_level', {}),
+            'by_priority': selection.get('by_priority', {}),
+            'pass_rate': pass_rate,
+            'completeness': 'full' if mode == 'L3' and verdict == 'PASS' else 'partial',
+            'target_coverage': '主流程全覆盖 + 异常/边界 + 容错',
+        }
+        if fixes_applied:
+            baseline_update['fixes_applied'] = fixes_applied
+
+        self.save_baseline(baseline_update)
+        print(f"[StateManager] baseline.json 已更新")
+
+        # 3. 追加到 history.jsonl
+        history_entry = {
+            'run_id': run_id,
+            'mode': mode,
+            'timestamp': now,
+            'verdict': verdict,
+            'pass_rate': pass_rate,
+            'manually_repaired': True,
+        }
+        self.append_to_history(history_entry)
+        print(f"[StateManager] history.jsonl 已追加")
+
+    def check_state_consistency(self) -> Dict[str, Any]:
+        """
+        检查 last.json + baseline.json 的状态一致性
+
+        Returns:
+            {
+                'consistent': bool,
+                'issues': [...],
+                'last_run': {...},
+                'baseline': {...},
+            }
+        """
+        issues = []
+
+        last_run = self.load_last_run()
+        baseline = self.load_baseline()
+
+        if not last_run:
+            return {
+                'consistent': False,
+                'issues': ['last.json 不存在'],
+                'last_run': None,
+                'baseline': baseline,
+            }
+
+        if not baseline:
+            return {
+                'consistent': True,
+                'issues': ['baseline.json 不存在（首次执行）'],
+                'last_run': last_run,
+                'baseline': None,
+            }
+
+        # 检查 1：状态是否完成
+        if last_run.get('status') == 'running':
+            issues.append("last.json status='running'，可能未正确完成")
+
+        # 检查 2：last.json 与 baseline.json 是否同步
+        last_run_id = last_run.get('run_id')
+        baseline_run_id = baseline.get('updated_by')
+        if last_run_id != baseline_run_id:
+            issues.append(
+                f"last.json (run_id={last_run_id}) 与 "
+                f"baseline.json (updated_by={baseline_run_id}) 不一致"
+            )
+
+        # 检查 3：execution 是否有结果
+        execution = last_run.get('execution', {})
+        if execution.get('end_time') is None:
+            issues.append("last.json execution.end_time 为空，未正确结束")
+
+        # 检查 4：gatekeeper_verdict 是否存在
+        verdict = last_run.get('gatekeeper_verdict')
+        if not verdict:
+            issues.append("last.json gatekeeper_verdict 未设置")
+
+        return {
+            'consistent': len(issues) == 0,
+            'issues': issues,
+            'last_run': last_run,
+            'baseline': baseline,
+        }

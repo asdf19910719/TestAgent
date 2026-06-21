@@ -673,6 +673,102 @@ E2E 失败
 - 同一断言连续失败 2 次 → 禁止继续修测试代码（说明问题在被测代码或需求）
 - 超限 → 输出 BLOCKED，等用户介入
 
+## 手动修复后状态回写规则（强制）⭐
+
+**当用户要求"修复失败的测试"或在 CONDITIONAL PASS / FAIL 后手动修复时，修复完成后必须按以下顺序更新文件，否则下次 Agent 启动会读到陈旧状态：**
+
+### 必须更新的 4 个文件
+
+```
+1. qa/run/last.json          — 最新执行状态
+2. qa/run/baseline.json      — 用例规模基线（包含修复结果）
+3. qa/release_gate_report.md — 最终报告
+4. qa/run/history.jsonl      — 历史记录（追加）
+```
+
+### last.json 必须更新的字段
+
+```python
+# 使用 StateManager API 更新（不要手写 JSON）
+from qa_agent.core.state_manager import StateManager
+sm = StateManager()
+
+last_run = sm.load_last_run()
+
+# 更新 execution 字段
+last_run['status'] = 'completed'   # 不能保留 'running'
+last_run['execution']['end_time'] = datetime.now().isoformat()
+last_run['execution']['duration_seconds'] = total_duration
+last_run['execution']['failures'] = remaining_failures   # 修复后剩余的失败
+last_run['execution']['pass_rate'] = '...'
+
+# 更新 gatekeeper_verdict
+last_run['gatekeeper_verdict']['verdict'] = 'PASS'   # 全部修复后
+last_run['gatekeeper_verdict']['reason'] = '经过 N 轮修复，全部用例通过'
+last_run['gatekeeper_verdict']['judged_at'] = datetime.now().isoformat()
+
+# 原子写回
+sm._atomic_write_json(sm.run_dir / 'last.json', last_run)
+```
+
+### baseline.json 必须更新的字段
+
+```python
+sm.update_baseline_after_run(
+    run_id=last_run['run_id'],
+    mode=last_run['mode'],
+    selection=last_run['selection'],
+    execution=last_run['execution'],
+)
+```
+
+或者手动写入时也必须包含：
+
+```python
+{
+    'updated_at': now,                        # 必须更新
+    'updated_by': run_id,                     # 必须更新
+    'mode': last_run['mode'],
+    'total_cases': total,
+    'pass_rate': '...',                       # 修复后的通过率
+    'completeness': 'full',                   # L3 完成
+    'fixes_applied': {                        # 记录修复内容
+        'fix_1': '描述',
+        'fix_2': '描述',
+    },
+    # 不要覆盖 established_at 和 history
+}
+```
+
+### 状态一致性检查
+
+修复完成后，**必须验证 4 个文件一致**：
+
+```python
+# 检查脚本
+last = sm.load_last_run()
+baseline = sm.load_baseline()
+
+assert last['status'] == 'completed', "last.json status 未更新"
+assert last['gatekeeper_verdict']['verdict'] in ('PASS', 'CONDITIONAL PASS'), "verdict 未更新"
+assert baseline['updated_by'] == last['run_id'], "baseline 与 last 不匹配"
+assert baseline['updated_at'] > last['execution']['start_time'], "baseline 时间戳异常"
+```
+
+### 禁止的反模式
+
+❌ **只更新 baseline.json，不更新 last.json**
+- 后果：下次 Agent 启动读 last.json 仍是旧状态，触发 checkpoint 恢复
+- 实际案例：StudySkill L3 修复后只写了 baseline.json，导致 last.json 仍是 status='running'
+
+❌ **手写 JSON，不用 StateManager API**
+- 后果：可能漏掉必要字段，破坏数据结构
+- 正确做法：使用 `sm.save_baseline()` / `sm.update_execution_result()` 等 API
+
+❌ **修复完成后不写 history.jsonl**
+- 后果：丢失修复记录，无法追溯
+- 正确做法：使用 `sm.append_to_history()` 追加记录
+
 ## 报告完成
 
 任务完成后，向主 Agent 报告：
