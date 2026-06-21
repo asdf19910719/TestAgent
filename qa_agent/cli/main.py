@@ -147,6 +147,108 @@ def retry():
 
 
 @cli.command()
+@click.argument('verdict', default='PASS')
+@click.argument('pass_rate', default='')
+@click.option('--reason', '-r', default='', help='修复原因说明')
+@click.option('--fixes', '-f', multiple=True, help='修复内容（可多次指定）')
+@click.option('--check-only', is_flag=True, help='只检查状态一致性，不更新')
+def finalize(verdict, pass_rate, reason, fixes, check_only):
+    """
+    手动修复后更新状态（last.json + baseline.json + history.jsonl）
+
+    用途：当你手动修复测试后，使用此命令更新 QA Agent 的执行状态。
+
+    示例：
+      qa finalize PASS "40/40 (100%)" --reason "修复选择器"
+      qa finalize "CONDITIONAL PASS" "38/40 (95%)" -r "v53/v622 waived"
+      qa finalize  # 默认 PASS
+    """
+    from ..core.state_manager import StateManager
+    from datetime import datetime
+
+    sm = StateManager()
+
+    # 1. 检查状态一致性
+    click.echo("\n[QA Agent] 检查状态一致性...")
+    consistency = sm.check_state_consistency()
+
+    if not consistency['consistent']:
+        click.secho("⚠️  检测到状态不一致:", fg='yellow')
+        for issue in consistency['issues']:
+            click.echo(f"  - {issue}")
+    else:
+        click.secho("✅ 当前状态一致", fg='green')
+
+    if check_only:
+        click.echo("\n[QA Agent] --check-only 模式，仅检查不更新")
+        return
+
+    # 2. 读取 last.json
+    last_run = sm.load_last_run()
+    if not last_run:
+        click.secho("❌ 错误: 没有找到上次执行记录 (last.json 不存在)", fg='red')
+        click.echo("   请先执行 /qa feature/module/release 再使用 finalize")
+        return
+
+    run_id = last_run.get('run_id', 'unknown')
+    mode = last_run.get('mode', 'unknown')
+
+    # 3. 显示即将更新的内容
+    click.echo(f"\n[QA Agent] 准备更新状态")
+    click.echo(f"  Run ID: {run_id}")
+    click.echo(f"  模式: {mode}")
+    click.echo(f"  判定: {verdict}")
+    click.echo(f"  通过率: {pass_rate or '(未指定)'}")
+    click.echo(f"  原因: {reason or '(未指定)'}")
+    if fixes:
+        click.echo(f"  修复内容:")
+        for fix in fixes:
+            click.echo(f"    - {fix}")
+
+    # 4. 确认
+    if not click.confirm("\n确认更新？", default=True):
+        click.echo("已取消")
+        return
+
+    # 5. 构造 fixes_applied
+    fixes_applied = {}
+    if reason:
+        fixes_applied['manual_repair_reason'] = reason
+    for i, fix in enumerate(fixes, 1):
+        fixes_applied[f'fix_{i}'] = fix
+
+    # 6. 调用 finalize_after_manual_repair
+    try:
+        sm.finalize_after_manual_repair(
+            verdict=verdict,
+            verdict_reason=reason or f'手动修复后判定为 {verdict}',
+            remaining_failures=[],  # TODO: 从用户输入解析
+            fixes_applied=fixes_applied if fixes_applied else None,
+            pass_rate=pass_rate,
+        )
+
+        click.secho("\n✅ 状态已更新:", fg='green')
+        click.echo("  ✅ qa/run/last.json")
+        click.echo("  ✅ qa/run/baseline.json")
+        click.echo("  ✅ qa/run/history.jsonl")
+
+    except Exception as e:
+        click.secho(f"\n❌ 更新失败: {e}", fg='red')
+        return
+
+    # 7. 再次检查一致性
+    click.echo("\n[QA Agent] 验证状态一致性...")
+    consistency = sm.check_state_consistency()
+    if consistency['consistent']:
+        click.secho("✅ 状态一致性检查: 通过", fg='green')
+    else:
+        click.secho("⚠️  状态一致性检查: 仍有问题", fg='yellow')
+        for issue in consistency['issues']:
+            click.echo(f"  - {issue}")
+
+    click.echo(f"\n[QA Agent] 下次执行 /qa {mode.lower()} 将读取最新状态")
+
+@cli.command()
 def status():
     """查看当前测试覆盖状态"""
     from ..core.yaml_serializer import CaseSerializer, BugSerializer

@@ -29,6 +29,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 | `retry` | - | 重跑上次 selection |
 | `resume` | - | 恢复中断的 L3 |
 | `status` | - | 查看当前覆盖状态 |
+| `finalize [verdict] [pass_rate]` | - | 手动修复后更新状态 ⭐ |
 | `L0` / `L0 <scope>` | L0 | 单点 sanity 快速验证 |
 
 ### 动态需求文档路径（重要）
@@ -403,5 +404,249 @@ python -m qa_agent.cli.main status
 10. **以"省成本"为由缩减执行集**
 
 ## 立即开始
+
+1. 读取 `.qa.toml` 配置（如果存在）
+2. 执行命令路由
+3. 委派给 `qa-test-engineer` + `qa-gatekeeper` Subagent
+
+---
+
+## `/qa finalize` — 手动修复后状态更新 ⭐
+
+### 用途
+
+**当你手动修复测试后，使用此命令更新 QA Agent 的执行状态，防止下次启动读到陈旧数据。**
+
+### 触发时机
+
+在以下场景手动修复测试后使用：
+
+1. **L3 CONDITIONAL PASS 后手动修复**
+   ```
+   Gatekeeper 判定: CONDITIONAL PASS
+   原因: 2 个 P0 E2E 失败 (v53/v622 为 harness 问题)
+   
+   [用户手动修复测试]
+   → /qa finalize PASS "39/40 (97.5%)"
+   ```
+
+2. **L3 FAIL 后手动修复部分用例**
+   ```
+   Gatekeeper 判定: FAIL
+   原因: 5 个 P0 失败
+   
+   [用户修复 3 个，剩余 2 个]
+   → /qa finalize "CONDITIONAL PASS" "38/40 (95%)"
+   ```
+
+3. **任何模式执行后手动调整**
+   ```
+   /qa feature login → 执行完成
+   [用户发现问题，手动修复]
+   → /qa finalize PASS "10/10 (100%)"
+   ```
+
+### 命令格式
+
+```bash
+/qa finalize [verdict] [pass_rate] [--reason <原因>]
+```
+
+**参数**：
+- `verdict`: 可选，默认 `PASS`
+  - `PASS` — 全部通过
+  - `CONDITIONAL PASS` — 大部分通过，少量失败已 waive
+  - `FAIL` — 仍有失败需处理
+- `pass_rate`: 可选，通过率字符串，如 `"39/40 (97.5%)"`
+- `--reason`: 可选，修复原因说明
+
+### 示例
+
+#### 示例 1：全部修复完成
+
+```bash
+/qa finalize PASS "40/40 (100%)" --reason "修复选择器 + Cloud API 重试"
+```
+
+**效果**：
+```
+[QA Agent] 手动修复完成，更新状态...
+✅ last.json 已更新: status=completed, verdict=PASS
+✅ baseline.json 已更新: completeness=full
+✅ history.jsonl 已追加修复记录
+✅ qa/release_gate_report.md 已更新
+
+状态一致性检查: ✅ 通过
+```
+
+---
+
+#### 示例 2：部分修复（接受 waivers）
+
+```bash
+/qa finalize "CONDITIONAL PASS" "38/40 (95%)" --reason "v53/v622 为 harness 问题，已创建 waivers.yml"
+```
+
+**效果**：
+```
+[QA Agent] 手动修复完成，更新状态...
+✅ last.json 已更新: status=completed, verdict=CONDITIONAL PASS
+✅ baseline.json 已更新: completeness=partial
+✅ waivers.yml 已记录 2 个豁免用例
+✅ history.jsonl 已追加修复记录
+
+状态一致性检查: ✅ 通过
+```
+
+---
+
+#### 示例 3：无参数（默认 PASS）
+
+```bash
+/qa finalize
+```
+
+等价于：
+```bash
+/qa finalize PASS
+```
+
+---
+
+### 实现逻辑
+
+```python
+from qa_agent.core.state_manager import StateManager
+
+def handle_finalize(verdict='PASS', pass_rate='', reason=''):
+    sm = StateManager()
+    
+    # 1. 检查当前状态
+    consistency = sm.check_state_consistency()
+    if not consistency['consistent']:
+        print("[QA Agent] 检测到状态不一致:")
+        for issue in consistency['issues']:
+            print(f"  ⚠️ {issue}")
+    
+    # 2. 读取当前 last.json
+    last_run = sm.load_last_run()
+    if not last_run:
+        print("❌ 错误: 没有找到上次执行记录 (last.json 不存在)")
+        return
+    
+    run_id = last_run['run_id']
+    mode = last_run['mode']
+    
+    # 3. 询问用户修复内容
+    print(f"\n[QA Agent] 准备更新 {run_id} ({mode}) 的状态")
+    print(f"  判定: {verdict}")
+    print(f"  通过率: {pass_rate or '(未指定)'}")
+    print(f"  原因: {reason or '(未指定)'}")
+    
+    if not confirm("确认更新？"):
+        print("已取消")
+        return
+    
+    # 4. 调用 finalize_after_manual_repair
+    fixes_applied = {}
+    if reason:
+        fixes_applied['manual_repair_reason'] = reason
+    
+    sm.finalize_after_manual_repair(
+        verdict=verdict,
+        verdict_reason=reason or f'手动修复后判定为 {verdict}',
+        remaining_failures=[],  # 可以从用户输入解析
+        fixes_applied=fixes_applied,
+        pass_rate=pass_rate,
+    )
+    
+    # 5. 再次检查一致性
+    consistency = sm.check_state_consistency()
+    if consistency['consistent']:
+        print("\n✅ 状态一致性检查: 通过")
+    else:
+        print("\n⚠️ 状态一致性检查: 仍有问题")
+        for issue in consistency['issues']:
+            print(f"  - {issue}")
+    
+    # 6. 显示摘要
+    print(f"\n[QA Agent] 已更新文件:")
+    print(f"  ✅ qa/run/last.json")
+    print(f"  ✅ qa/run/baseline.json")
+    print(f"  ✅ qa/run/history.jsonl")
+    print(f"\n下次执行 /qa {mode.lower()} 将读取最新状态")
+```
+
+### 内部调用 API
+
+**Python 代码中调用**（不通过命令）：
+
+```python
+from qa_agent.core.state_manager import StateManager
+
+sm = StateManager()
+sm.finalize_after_manual_repair(
+    verdict='PASS',
+    verdict_reason='经过 3 轮手动修复，全部用例通过',
+    remaining_failures=[],
+    fixes_applied={
+        'selector_fix': '更新 6 个 page object helper',
+        'cloud_api_fix': 'useCurrentProject fallback to localStorage',
+        'seed_state_fix': 'consumed_stage_note 字段追加',
+    },
+    pass_rate='39/40 (97.5%)',
+)
+```
+
+### 注意事项
+
+1. **必须在测试执行后使用**
+   - 如果 `qa/run/last.json` 不存在 → 报错
+   - 确保上次执行记录可读
+
+2. **不会重新执行测试**
+   - 此命令只更新状态文件
+   - 不会重跑任何用例
+   - 假设用户已手动验证修复结果
+
+3. **状态一致性检查**
+   - 命令会自动检查 4 个文件是否同步
+   - 如有不一致会警告但仍会继续
+
+4. **与自动修复循环的区别**
+   - 自动修复循环：Agent 自动修复 + 重跑 + 更新状态
+   - `/qa finalize`：用户手动修复 + 手动更新状态
+
+### 配合 waivers.yml 使用
+
+当接受 CONDITIONAL PASS 时，建议创建 waivers.yml：
+
+```yaml
+# qa/waivers.yml
+waivers:
+  - case_id: TC-rele-004
+    bug_id: BUG-L3-003
+    reason: v53 物理设备缺失，Playwright WebView 问题
+    waived_by: user@example.com
+    waived_at: 2026-06-21T10:30:00
+    expires_at: 2026-07-21T10:30:00  # 30 天有效期
+    
+  - case_id: TC-rele-008
+    bug_id: BUG-L3-002
+    reason: v622 Cloud API 500，已在 v623 修复
+    waived_by: user@example.com
+    waived_at: 2026-06-21T10:30:00
+    expires_at: 2026-07-21T10:30:00
+```
+
+然后执行：
+
+```bash
+/qa finalize "CONDITIONAL PASS" "38/40 (95%)" --reason "v53/v622 已豁免，见 waivers.yml"
+```
+
+---
+
+## 立即开始（真正的）
 
 现在解析 `$ARGUMENTS` 并执行对应路由。如果 `$ARGUMENTS` 为空，显示帮助信息。

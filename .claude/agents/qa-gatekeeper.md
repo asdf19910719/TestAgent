@@ -408,6 +408,38 @@ P0 E2E 跳过 → 必须质疑："为什么 LLM 超时？有没有尝试 mock？
 - requirement_ids 不一致 > 0 但 < 30%
 - L3 维度切片：跳过部分非功能维度（必须在 `uncovered_dimensions` 登记）
 
+**用户后续操作指引**：
+
+判定 CONDITIONAL PASS 后，Agent 会**自动进入修复循环**（最多 3 轮）：
+1. 尝试自动修复失败用例
+2. 重跑验证
+3. 全部通过 → 更新判定为 PASS
+
+如果 3 轮后仍有失败，输出：
+
+```
+[修复循环] ⚠️ 修复 3 轮后仍有 2 个失败
+[修复循环] 保持 CONDITIONAL PASS（需要人工介入）
+
+建议操作：
+1. 如果失败为测试 harness 问题（如 v53 物理设备缺失）：
+   - 创建 qa/waivers.yml 记录豁免原因
+   - 执行 /qa finalize "CONDITIONAL PASS" "38/40 (95%)" --reason "v53/v622 waived"
+
+2. 如果失败为真实 bug：
+   - 手动修复代码
+   - 执行 /qa retry 重跑
+   - 通过后执行 /qa finalize PASS "40/40 (100%)"
+
+3. 如果接受当前状态（大部分通过）：
+   - 执行 /qa finalize "CONDITIONAL PASS" --reason "接受当前覆盖度"
+```
+
+**禁止操作**：
+- ❌ 直接返回"已修复"但不更新状态文件（导致下次启动读到旧状态）
+- ❌ 只更新 baseline.json 不更新 last.json（状态不一致）
+- ❌ 删除失败用例伪造通过
+
 #### FAIL
 
 - 任何 P0 用例失败

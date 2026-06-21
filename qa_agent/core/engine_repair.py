@@ -16,6 +16,26 @@ def repair_loop_l3(
     """
     CONDITIONAL PASS 后的自动修复循环
 
+    **触发时机**：
+    - Gatekeeper 判定为 CONDITIONAL PASS
+    - Engine._run_l3() 检测到 verdict='CONDITIONAL PASS'
+    - 自动进入修复循环（不需要用户触发）
+
+    **适用场景**：
+    1. E2E 少量失败（< 30%）但原因明确（选择器过时、API 500）
+    2. 失败可自动修复（不需要人工判断）
+    3. 修复后预期全部通过
+
+    **不适用场景**（需要用户介入）：
+    1. 失败原因复杂（需要调试、阅读日志）
+    2. 测试 harness 问题（Playwright bug、Cloud API 问题）
+    3. 需要人工判断是否接受 waiver
+
+    **用户介入流程**：
+    - 修复循环尝试 3 轮后仍有失败 → 返回 CONDITIONAL PASS
+    - Gatekeeper 输出报告："2 个失败需人工复审"
+    - 用户手动修复 → 执行 /qa finalize PASS "40/40 (100%)"
+
     遵守 CLAUDE.md 持久性规则：
     - 禁止过早声明"不可修复"
     - 每次修复后报告进度
