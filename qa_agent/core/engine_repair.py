@@ -184,12 +184,31 @@ def repair_loop_l3(
     else:
         print(f"\n[修复循环] ⚠️ 修复 {iteration} 轮后仍有 {len(remaining_failures)} 个失败")
         print(f"[修复循环] 保持 CONDITIONAL PASS（需要人工介入）")
+
+        # 自动生成 waivers.yml 草案（AI 责任）
+        try:
+            from pathlib import Path
+            print(f"\n[修复循环] AI 自动分析失败原因，生成 waivers 草案...")
+            draft_path = gatekeeper.generate_waivers_draft(
+                failures=remaining_failures,
+                designed_cases=designed_cases,
+                output_path=Path('qa/waivers.draft.yml'),
+            )
+            print(f"\n[修复循环] 后续操作建议:")
+            print(f"  1. 审核 {draft_path}")
+            print(f"  2. 填写 waived_by 字段")
+            print(f"  3. 重命名为 qa/waivers.yml")
+            print(f"  4. 执行 /qa finalize \"CONDITIONAL PASS\" \"{...}/{...}\"")
+        except Exception as e:
+            print(f"[修复循环] waivers 草案生成失败: {e}")
+
         final_verdict = {
             'verdict': 'CONDITIONAL PASS',
             'reason': f'经过 {iteration} 轮修复，剩余 {len(remaining_failures)} 个失败用例需人工修复',
             'uncovered_requirements': [],
             'requirement_ids_inconsistencies': [],
             'uncovered_dimensions': [],
+            'waivers_draft': 'qa/waivers.draft.yml',  # 引用草案
         }
 
     return final_verdict, remaining_failures

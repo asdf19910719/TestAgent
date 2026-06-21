@@ -186,3 +186,201 @@ class Gatekeeper:
         """
         # Phase 3: 查询用例库
         return 'P0' in case_id.upper()
+
+    def generate_waivers_draft(
+        self,
+        failures: list,
+        designed_cases: list,
+        output_path: Path = None,
+    ) -> Path:
+        """
+        自动生成 waivers.yml 草案
+
+        分析每个失败用例的原因，识别可豁免的项（harness 问题、物理设备等），
+        生成草案文件。**用户必须审核 + 签字确认才能生效。**
+
+        Args:
+            failures: 失败用例列表 [{case_id, message, ...}]
+            designed_cases: 所有用例
+            output_path: 输出路径，默认 qa/waivers.draft.yml
+
+        Returns:
+            生成的草案文件路径
+        """
+        from datetime import datetime, timedelta
+        import yaml
+
+        if output_path is None:
+            output_path = Path('qa/waivers.draft.yml')
+
+        # 分析每个失败用例
+        waiver_candidates = []
+        for failure in failures:
+            case_id = failure.get('case_id', '')
+            message = failure.get('message', '').lower()
+
+            # 识别 waiver 类型
+            waiver_type, waiver_reason = self._classify_failure_for_waiver(message)
+
+            if waiver_type == 'NOT_WAIVABLE':
+                # 真实 bug，不应豁免
+                continue
+
+            # 找到对应的用例
+            target_case = next((c for c in designed_cases if c.id == case_id), None)
+            case_title = target_case.title if target_case else case_id
+
+            waiver_candidates.append({
+                'case_id': case_id,
+                'case_title': case_title,
+                'bug_id': failure.get('bug_id', ''),
+                'waiver_type': waiver_type,
+                'reason': waiver_reason,
+                'failure_message': failure.get('message', '')[:200],
+                'waived_by': 'TBD-BY-USER',  # 用户必须填写
+                'waived_at': datetime.now().isoformat(),
+                'expires_at': (datetime.now() + timedelta(days=30)).isoformat(),
+                'requires_signoff': True,  # 必须签字
+            })
+
+        # 生成 YAML
+        draft = {
+            '# 注意': 'AI 自动生成的草案，用户必须审核 + 填写 waived_by 后才能生效',
+            '# 使用方法': [
+                '1. 审核每个 waiver 是否合理',
+                '2. 填写 waived_by 字段（你的标识）',
+                '3. 重命名为 waivers.yml（去掉 .draft）',
+                '4. 执行 /qa finalize "CONDITIONAL PASS" "X/Y" --reason "..."',
+            ],
+            'waivers': waiver_candidates,
+            'metadata': {
+                'generated_at': datetime.now().isoformat(),
+                'generated_by': 'qa-gatekeeper',
+                'total_candidates': len(waiver_candidates),
+                'requires_user_review': True,
+            },
+        }
+
+        # 写入文件
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            yaml.dump(draft, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+        print(f"[Gatekeeper] waivers 草案已生成: {output_path}")
+        print(f"[Gatekeeper] 共识别 {len(waiver_candidates)} 个可豁免候选")
+        print(f"[Gatekeeper] [WARN] 用户必须审核 + 填写 waived_by 才能生效")
+
+        return output_path
+
+    def _classify_failure_for_waiver(self, message: str) -> tuple:
+        """
+        分类失败原因，判断是否可豁免
+
+        Returns:
+            (waiver_type, reason)
+        """
+        msg = message.lower()
+
+        # 优先级 1: 真实 bug（最优先，避免误豁免）
+        if any(kw in msg for kw in [
+            'typeerror',
+            'referenceerror',
+            'assertionerror',
+            'expected',
+            'undefined is not',
+            'cannot read property',
+            'syntaxerror',
+        ]):
+            return ('NOT_WAIVABLE', '代码 bug，必须修复')
+
+        # 优先级 2: 物理设备问题
+        if any(kw in msg for kw in [
+            'physical device', '物理设备',
+            'android device', 'ios simulator',
+            'simulator not found',
+            'cannot find android', 'cannot find ios',
+        ]):
+            return ('PHYSICAL_DEVICE', '需要物理设备测试，CI 环境缺失')
+
+        # 优先级 3: 测试 harness 问题
+        if any(kw in msg for kw in [
+            'playwright',
+            'vite cache',
+            'harness',
+            'test runner',
+            'test framework',
+            'webview',
+        ]):
+            return ('HARNESS_ISSUE', '测试框架/harness 自身问题，非代码 bug')
+
+        # 优先级 4: 基础设施问题
+        if any(kw in msg for kw in [
+            'cloud api 500',
+            'gateway timeout',
+            '504',
+            ' 500',  # API 500（注意空格避免误匹配）
+            'returned 500',
+            'returned 502',
+            'returned 503',
+            'returned 504',
+            'network unreachable',
+            'connection refused',
+            'service unavailable',
+        ]):
+            return ('INFRA_ISSUE', '基础设施/服务不稳定，非代码 bug')
+
+        # 优先级 5: LLM 相关
+        if any(kw in msg for kw in [
+            'llm timeout',
+            'llm api',
+            'minimax',
+            'openai',
+            'anthropic',
+        ]):
+            return ('INFRA_ISSUE', 'LLM API 不稳定，可用 mock 替代')
+
+        # 优先级 6: Flaky test（最低优先级）
+        if any(kw in msg for kw in [
+            'timeout',
+            'intermittent',
+            'flaky',
+            'sometimes fails',
+        ]):
+            return ('FLAKY_TEST', '测试不稳定，需要人工判断')
+
+        # 默认：不可豁免（保守策略）
+        return ('NOT_WAIVABLE', '无法分类，建议人工判断是否豁免')
+
+    def load_waivers(self, waivers_path: Path = Path('qa/waivers.yml')) -> Dict[str, Any]:
+        """
+        加载 waivers.yml（用户已签字的版本）
+
+        如果 waivers.yml 不存在但 waivers.draft.yml 存在，警告用户先签字。
+        """
+        import yaml
+
+        if not waivers_path.exists():
+            # 检查是否有草案
+            draft_path = waivers_path.parent / 'waivers.draft.yml'
+            if draft_path.exists():
+                print(f"[Gatekeeper] [WARN] 发现未签字的 waivers 草案: {draft_path}")
+                print(f"[Gatekeeper] [WARN] 请审核 + 填写 waived_by 后重命名为 waivers.yml")
+            return {'waivers': []}
+
+        with open(waivers_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+
+        # 验证每个 waiver 都有 waived_by（不能是 TBD-BY-USER）
+        valid_waivers = []
+        invalid_count = 0
+        for w in data.get('waivers', []):
+            if w.get('waived_by') in (None, '', 'TBD-BY-USER'):
+                print(f"[Gatekeeper] [WARN] Waiver {w.get('case_id')} 缺少签字（waived_by），已忽略")
+                invalid_count += 1
+                continue
+            valid_waivers.append(w)
+
+        if invalid_count > 0:
+            print(f"[Gatekeeper] [WARN] 共 {invalid_count} 个 waiver 因缺少签字被忽略")
+
+        return {'waivers': valid_waivers}

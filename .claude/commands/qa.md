@@ -619,31 +619,81 @@ sm.finalize_after_manual_repair(
 
 ### 配合 waivers.yml 使用
 
-当接受 CONDITIONAL PASS 时，建议创建 waivers.yml：
+**重要：waivers.yml 由 AI 自动生成草案，用户审核签字后生效**
 
-```yaml
-# qa/waivers.yml
-waivers:
-  - case_id: TC-rele-004
-    bug_id: BUG-L3-003
-    reason: v53 物理设备缺失，Playwright WebView 问题
-    waived_by: user@example.com
-    waived_at: 2026-06-21T10:30:00
-    expires_at: 2026-07-21T10:30:00  # 30 天有效期
-    
-  - case_id: TC-rele-008
-    bug_id: BUG-L3-002
-    reason: v622 Cloud API 500，已在 v623 修复
-    waived_by: user@example.com
-    waived_at: 2026-06-21T10:30:00
-    expires_at: 2026-07-21T10:30:00
-```
-
-然后执行：
+#### 完整流程
 
 ```bash
-/qa finalize "CONDITIONAL PASS" "38/40 (95%)" --reason "v53/v622 已豁免，见 waivers.yml"
+# 1. L3 执行 → 修复循环 3 轮后仍有失败
+/qa release
+# Agent 自动生成 qa/waivers.draft.yml
+# 输出: "AI 自动分析失败原因，生成 waivers 草案..."
+
+# 2. 用户审核草案（AI 已填写大部分字段）
+cat qa/waivers.draft.yml
+# 内容示例:
+# waivers:
+#   - case_id: TC-rele-004
+#     waiver_type: PHYSICAL_DEVICE
+#     reason: 需要物理设备测试，CI 环境缺失
+#     waived_by: TBD-BY-USER    # ← 用户必须填写
+#     ...
+
+# 3. 用户填写 waived_by 字段（签字）
+# 用编辑器打开 qa/waivers.draft.yml
+# 把 TBD-BY-USER 改为你的标识（邮箱/姓名）
+
+# 4. 重命名为正式版本
+mv qa/waivers.draft.yml qa/waivers.yml
+
+# 5. 接受 CONDITIONAL PASS
+/qa finalize "CONDITIONAL PASS" "38/40 (95%)" \
+  --reason "v53/v622 已签字豁免，见 waivers.yml"
 ```
+
+#### waivers.yml 由谁创建？
+
+| 操作 | 责任方 | 说明 |
+|---|---|---|
+| **分析失败原因** | AI（Gatekeeper） | 看日志、错误堆栈、代码 |
+| **分类 waiver 类型** | AI（Gatekeeper） | HARNESS_ISSUE / PHYSICAL_DEVICE 等 |
+| **生成草案文件** | AI（Gatekeeper） | qa/waivers.draft.yml |
+| **填写 case_id/reason** | AI（Gatekeeper） | 已自动填写 |
+| **审核合理性** | 用户 | 检查 reason 是否准确 |
+| **签字（waived_by）** | 用户 | 法律/合规要求 |
+| **重命名为 .yml** | 用户 | 表示生效 |
+| **执行 /qa finalize** | 用户 | 最终确认状态变更 |
+
+#### 自动分类规则
+
+AI 根据失败信息自动识别：
+
+| 关键词 | 类型 | 可豁免 |
+|---|---|---|
+| `physical device` / `webview` | `PHYSICAL_DEVICE` | ✅ |
+| `playwright` / `harness` | `HARNESS_ISSUE` | ✅ |
+| `cloud api 500` / `504` | `INFRA_ISSUE` | ✅ |
+| `llm timeout` | `INFRA_ISSUE` | ✅ |
+| `timeout` / `flaky` | `FLAKY_TEST` | ⚠️ 需人工判断 |
+| `typeerror` / `assertionerror` | `NOT_WAIVABLE` | ❌ 真实 bug |
+
+#### 验证规则
+
+`load_waivers()` 会自动验证：
+
+```python
+# qa_agent/core/gatekeeper.py
+def load_waivers(self, waivers_path):
+    # 1. 读取 qa/waivers.yml（不是 .draft）
+    # 2. 验证每个 waiver 的 waived_by 不能是空 / TBD-BY-USER
+    # 3. 缺少签字的 waiver 会被忽略
+    # 4. 如果只有 .draft 文件 → 警告用户先签字
+```
+
+**禁止行为**：
+- ❌ 用户手动从零创建 waivers.yml（应基于 AI 生成的草案）
+- ❌ AI 自行签字 waived_by（必须用户确认）
+- ❌ 直接修改 waivers.yml 跳过 .draft 流程
 
 ---
 

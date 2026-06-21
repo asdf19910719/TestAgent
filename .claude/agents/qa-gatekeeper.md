@@ -415,30 +415,89 @@ P0 E2E 跳过 → 必须质疑："为什么 LLM 超时？有没有尝试 mock？
 2. 重跑验证
 3. 全部通过 → 更新判定为 PASS
 
-如果 3 轮后仍有失败，输出：
+如果 3 轮后仍有失败，Agent 会**自动生成 waivers.yml 草案**，输出：
 
 ```
 [修复循环] ⚠️ 修复 3 轮后仍有 2 个失败
-[修复循环] 保持 CONDITIONAL PASS（需要人工介入）
+[修复循环] AI 自动分析失败原因，生成 waivers 草案...
+[Gatekeeper] waivers 草案已生成: qa/waivers.draft.yml
+[Gatekeeper] 共识别 2 个可豁免候选
+[Gatekeeper] ⚠️  用户必须审核 + 填写 waived_by 才能生效
 
-建议操作：
-1. 如果失败为测试 harness 问题（如 v53 物理设备缺失）：
-   - 创建 qa/waivers.yml 记录豁免原因
-   - 执行 /qa finalize "CONDITIONAL PASS" "38/40 (95%)" --reason "v53/v622 waived"
-
-2. 如果失败为真实 bug：
-   - 手动修复代码
-   - 执行 /qa retry 重跑
-   - 通过后执行 /qa finalize PASS "40/40 (100%)"
-
-3. 如果接受当前状态（大部分通过）：
-   - 执行 /qa finalize "CONDITIONAL PASS" --reason "接受当前覆盖度"
+后续操作建议:
+1. 审核 qa/waivers.draft.yml
+   - AI 已识别失败类型（HARNESS_ISSUE / PHYSICAL_DEVICE / INFRA_ISSUE）
+   - AI 已填写 reason、case_id、bug_id
+   - 用户只需审核 + 签字
+2. 填写 waived_by 字段（你的标识，如邮箱）
+3. 重命名为 qa/waivers.yml（去掉 .draft）
+4. 执行 /qa finalize "CONDITIONAL PASS" "38/40 (95%)"
 ```
 
+**责任分工**：
+- ✅ AI 责任（Gatekeeper）：
+  - 分析失败原因
+  - 分类 waiver 类型（HARNESS_ISSUE/PHYSICAL_DEVICE/INFRA_ISSUE/FLAKY_TEST/NOT_WAIVABLE）
+  - 生成 waivers.draft.yml 草案
+  - 填写 case_id、bug_id、reason、expires_at（30天）
+- ✅ 用户责任：
+  - 审核 AI 生成的 reason 是否合理
+  - 填写 waived_by（你的签字）
+  - 重命名为 waivers.yml
+  - 执行 /qa finalize
+
 **禁止操作**：
-- ❌ 直接返回"已修复"但不更新状态文件（导致下次启动读到旧状态）
-- ❌ 只更新 baseline.json 不更新 last.json（状态不一致）
+- ❌ 直接返回"已修复"但不更新状态文件
+- ❌ 只更新 baseline.json 不更新 last.json
 - ❌ 删除失败用例伪造通过
+- ❌ AI 自行签字（waived_by 必须由用户填写）
+
+### waivers.yml 自动生成规则
+
+**生成时机**：
+- 修复循环 3 轮后仍有失败 → 自动调用 `gatekeeper.generate_waivers_draft()`
+- 输出路径：`qa/waivers.draft.yml`（注意是 .draft，不是直接生效）
+
+**分类规则**：
+
+| 失败原因关键词 | waiver_type | 是否可豁免 |
+|---|---|---|
+| `physical device` / `webview` / `simulator` | `PHYSICAL_DEVICE` | ✅ 可豁免 |
+| `playwright` / `vite cache` / `harness` | `HARNESS_ISSUE` | ✅ 可豁免 |
+| `cloud api 500` / `504` / `connection refused` | `INFRA_ISSUE` | ✅ 可豁免 |
+| `llm timeout` / `llm api` | `INFRA_ISSUE` | ✅ 可豁免 |
+| `timeout` / `flaky` | `FLAKY_TEST` | ⚠️  需人工判断 |
+| `typeerror` / `assertionerror` / `expected` | `NOT_WAIVABLE` | ❌ 真实 bug |
+
+**草案文件结构**：
+
+```yaml
+# 注意: AI 自动生成的草案，用户必须审核 + 填写 waived_by 后才能生效
+
+waivers:
+  - case_id: TC-rele-004
+    case_title: v53 移动端隔离测试
+    bug_id: BUG-L3-003
+    waiver_type: PHYSICAL_DEVICE
+    reason: 需要物理设备测试，CI 环境缺失
+    failure_message: "Cannot find Android device..."
+    waived_by: TBD-BY-USER  # ← 用户必须填写
+    waived_at: 2026-06-21T10:30:00
+    expires_at: 2026-07-21T10:30:00
+    requires_signoff: true
+
+metadata:
+  generated_at: 2026-06-21T10:30:00
+  generated_by: qa-gatekeeper
+  total_candidates: 2
+  requires_user_review: true
+```
+
+**load_waivers() 验证规则**：
+- ✅ 读取 `qa/waivers.yml`（不是 .draft）
+- ✅ 验证每个 waiver 的 `waived_by` 不能是 `TBD-BY-USER` 或空
+- ⚠️  缺少签字的 waiver 会被忽略（不生效）
+- ⚠️  如果只有 .draft 文件 → 警告用户先签字
 
 #### FAIL
 
