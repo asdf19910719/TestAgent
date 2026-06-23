@@ -47,7 +47,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 - 如有多个目录，可多次传 `--docs-path`
 
 **文档分类**（subagent 自动完成）：
-- 子目录名优先：`prd/` → 需求，`design/architecture/` → 设计，`api/apis/` → API
+- **Spec-kit 标准文件名优先**（精确匹配）：`spec.md` → 需求，`plan.md`/`data-model.md`/`research.md` → 设计，`quickstart.md` → 验收，`tasks.md` → 参考材料
+- 子目录名优先：`prd/` → 需求，`design/architecture/` → 设计，`api/apis/contracts/` → API，`acceptance/verification/` → 验收
 - 文件名关键词：含 `requirement/prd/spec/需求/规格` → 需求；含 `design/architecture/技术方案/架构` → 设计
 - 汇总文件优先：`*-all.md` / `*-overview.md` / 含 "总/全量/汇总" 中文名
 - 无法分类的文档归入 `unclassified`，但仍作为参考材料

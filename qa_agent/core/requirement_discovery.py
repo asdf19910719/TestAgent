@@ -388,6 +388,19 @@ EXCLUDE_KEYWORDS = [
 ]
 
 
+# Spec-kit 框架标准文件名（精确匹配，优先级最高）
+# 来源：https://github.com/github/spec-kit
+# 典型目录结构：specs/<feature-id>/{spec,plan,data-model,research,tasks,quickstart}.md
+SPEC_KIT_FILENAMES = {
+    'spec': 'requirement',          # Feature Specification
+    'plan': 'design',               # Implementation Plan
+    'data-model': 'design',         # Data Model
+    'research': 'design',           # Technical Research
+    'quickstart': 'acceptance',     # Validation Guide
+    'tasks': 'unclassified',        # Task List（作为参考材料，不归入主分类）
+}
+
+
 def discover_from_directory(directory: str, cwd: Path = Path('.')) -> Dict[str, Any]:
     """
     从用户指定目录中发现并分类文档
@@ -485,13 +498,23 @@ def classify_document(path: Path) -> str:
     """
     根据文件名启发式分类文档
 
+    优先级：
+    1. Spec-kit 精确文件名（spec/plan/data-model/research/quickstart/tasks）
+    2. 父目录名（prd/design/api/acceptance 等）
+    3. 排除关键词（readme/changelog 等）
+    4. 文件名关键词模糊匹配
+
     Returns:
         'requirement' | 'design' | 'api' | 'acceptance' | 'unclassified'
     """
     name_lower = path.stem.lower()
     parent_lower = path.parent.name.lower()
 
-    # 第一优先级：父目录名
+    # 第一优先级：Spec-kit 标准文件名（精确匹配）
+    if name_lower in SPEC_KIT_FILENAMES:
+        return SPEC_KIT_FILENAMES[name_lower]
+
+    # 第二优先级：父目录名
     if parent_lower in ('prd', 'requirements', 'requirement', 'specs', 'spec',
                          '需求', '产品需求'):
         return 'requirement'
