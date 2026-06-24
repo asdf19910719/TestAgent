@@ -67,6 +67,21 @@ class TestRequirementDiscovery:
         assert result['source'] == 'convention'
         assert len(result['specs']) >= 1
 
+    def test_finds_spec_kit_design_via_convention(self, tmp_path):
+        """约定扫描（无 --docs-path）也能从 specs/*/plan.md 发现设计文档"""
+        spec_dir = tmp_path / 'specs' / '002-feature'
+        spec_dir.mkdir(parents=True)
+        (spec_dir / 'spec.md').write_text('# Spec')
+        (spec_dir / 'plan.md').write_text('# Implementation Plan')
+        (spec_dir / 'data-model.md').write_text('# Data Model')
+
+        result = discover_requirements({}, cwd=tmp_path)
+        assert result['source'] == 'convention'
+        # 设计文档不再为 None（spec-kit 没有 design.md，但有 plan/data-model）
+        assert result['design'] is not None
+        assert any(name in result['design']
+                   for name in ('plan.md', 'data-model.md', 'research.md'))
+
     def test_explicit_config_overrides(self, tmp_path):
         """显式配置优先级最高"""
         # 同时存在 docs/ 和自定义路径

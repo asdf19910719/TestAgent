@@ -86,6 +86,39 @@ class TestClassifyDocument:
         doc.write_text('')
         assert classify_document(doc) == 'unclassified'
 
+    def test_classify_spec_kit_filenames(self, tmp_path):
+        """spec-kit 标准文件名精确分类"""
+        feature_dir = tmp_path / 'specs' / '002-auto-llm'
+        feature_dir.mkdir(parents=True)
+
+        cases = {
+            'spec.md': 'requirement',
+            'plan.md': 'design',
+            'data-model.md': 'design',
+            'research.md': 'design',
+            'quickstart.md': 'acceptance',
+            'validation-checklist.md': 'acceptance',
+            'tasks.md': 'unclassified',
+        }
+        for fname, expected in cases.items():
+            doc = feature_dir / fname
+            doc.write_text('')
+            assert classify_document(doc) == expected, f'{fname} 应为 {expected}'
+
+    def test_classify_validation_checklist_by_keyword(self, tmp_path):
+        """validation / checklist 关键词 → acceptance（即使不在 feature 目录）"""
+        doc = tmp_path / 'my-validation-checklist.md'
+        doc.write_text('')
+        assert classify_document(doc) == 'acceptance'
+
+    def test_classify_by_parent_checklists_dir(self, tmp_path):
+        """父目录 checklists/ → acceptance"""
+        d = tmp_path / 'checklists'
+        d.mkdir()
+        doc = d / 'ux.md'
+        doc.write_text('')
+        assert classify_document(doc) == 'acceptance'
+
 
 class TestDiscoverFromDirectory:
     """测试用户动态指定目录"""
@@ -170,6 +203,43 @@ class TestDiscoverFromDirectory:
 
         # 没有任何分类匹配，但有未分类文档 → primary 应该指向它
         assert result['primary'] is not None
+
+    def test_discover_spec_kit_feature_dir(self, tmp_path):
+        """复现用户场景：spec-kit feature 目录（无 design.md，含 validation-checklist）"""
+        feature_dir = tmp_path / 'specs' / '002-auto-llm-material-analysis'
+        feature_dir.mkdir(parents=True)
+
+        (feature_dir / 'spec.md').write_text('# Feature Spec')
+        (feature_dir / 'plan.md').write_text('# Plan')
+        (feature_dir / 'data-model.md').write_text('# Data Model')
+        (feature_dir / 'research.md').write_text('# Research')
+        (feature_dir / 'quickstart.md').write_text('# Quickstart')
+        (feature_dir / 'validation-checklist.md').write_text('# Validation Checklist')
+        (feature_dir / 'tasks.md').write_text('# Tasks')
+        # 子目录
+        (feature_dir / 'checklists').mkdir()
+        (feature_dir / 'checklists' / 'ux.md').write_text('# UX Checklist')
+        (feature_dir / 'contracts').mkdir()
+        (feature_dir / 'contracts' / 'api.md').write_text('# API contract')
+
+        result = discover_from_directory(str(feature_dir))
+
+        assert result['source'] == 'dynamic'
+        # spec.md 作为主需求
+        assert result['primary'] and 'spec.md' in result['primary']
+        # 设计文档：plan/data-model/research 三个都在 all_designs
+        assert len(result['all_designs']) >= 3
+        design_names = {Path(p).name for p in result['all_designs']}
+        assert {'plan.md', 'data-model.md', 'research.md'} <= design_names
+        # validation-checklist + quickstart 归 acceptance（不再被丢进 unclassified）
+        all_doc_names = {Path(p).name for p in result['all_docs']}
+        assert 'validation-checklist.md' in all_doc_names
+        unclassified_names = {Path(p).name for p in result['unclassified']}
+        assert 'validation-checklist.md' not in unclassified_names
+        assert 'quickstart.md' not in unclassified_names
+        # tasks.md 仍是 unclassified（参考材料），但出现在 all_docs
+        assert 'tasks.md' in unclassified_names
+        assert 'tasks.md' in all_doc_names
 
 
 class TestMergeDiscoveryResults:

@@ -414,6 +414,13 @@ def prepare(mode, scope, impact, docs_path):
             'design': docs_info.get('design'),
             'api': docs_info.get('api'),
             'acceptance': docs_info.get('acceptance'),
+            # 完整路径列表（subagent 必须能拿到这些才能逐个阅读）
+            'all_docs': docs_info.get('all_docs', []),
+            'all_designs': docs_info.get('all_designs', []),
+            'all_apis': docs_info.get('all_apis', []),
+            'specs': docs_info.get('specs', []),
+            'unclassified': docs_info.get('unclassified', []),
+            # 计数（保留，方便快速查看）
             'all_docs_count': len(docs_info.get('all_docs', [])),
             'unclassified_count': len(docs_info.get('unclassified', [])),
             'directory': docs_info.get('directory')

@@ -93,13 +93,25 @@ python -m qa_agent.cli.main discover-docs --path "doc/v2026-06-17-当前版本�
   "primary": "doc/v2026-06-17-当前版本文档/产品需求文档.md",
   "design": "doc/v2026-06-17-当前版本文档/技术方案.md",
   "api": "doc/v2026-06-17-当前版本文档/接口设计.md",
+  "acceptance": "specs/002-xxx/quickstart.md",
   "specs": [...],
+  "all_designs": [...],
+  "all_apis": [...],
   "all_docs": [...],
   "unclassified": [...]
 }
 ```
 
-读取 `qa/run/selection.md` 获得用例列表，读取 `docs.primary` 获得主需求文档。
+⚠️ **重要：`design`/`api`/`acceptance` 字段只是"每类的主文档"（单个文件）。**
+spec-kit 这类框架会把设计拆在 `plan.md`/`data-model.md`/`research.md` 多个文件里，
+把验收拆在 `quickstart.md`/`validation-checklist.md` 里。因此**必须读完整列表**：
+- 设计文档：读 `all_designs` 里的**全部**文件，不能只读 `design` 一个
+- API 文档：读 `all_apis` 里的全部文件
+- 未分类文档（`unclassified`）：**也要作为参考材料阅读**，里面常有 `tasks.md`、
+  约束清单等关键上下文。不得因为"没分类"就跳过。
+
+读取 `qa/run/selection.md` 获得用例列表，读取 `docs.primary` 获得主需求文档，
+读取 `docs.all_docs` 获得本次范围内的**全部**文档清单。
 
 ### 步骤 3：用户确认
 
@@ -140,10 +152,21 @@ Agent(
   - 模式: L<?>
   - 范围: <scope>
   - 已选用例 (qa/run/selection.md): <内容>
-  - 需求文档: <路径>
+  - 主需求文档: <docs.primary>
+  - 设计文档（全部，逐个读）: <docs.all_designs 列表，无则用 docs.design>
+  - API 文档（全部）: <docs.all_apis 列表，无则用 docs.api>
+  - 验收文档: <docs.acceptance>
+  - 未分类参考材料（必须阅读）: <docs.unclassified 列表>
+  - 本次范围全部文档: <docs.all_docs 列表>
   - 项目类型: <type>
   - 测试框架: <frameworks>
   - 用例库状态: <空 | N 条已有用例>
+
+  ⚠️ 文档阅读要求：
+  - 不要只读主需求文档。设计/API/验收/未分类清单里的文件**逐个读完**。
+  - spec-kit 框架的设计内容拆在 plan.md/data-model.md/research.md，
+    验收拆在 quickstart.md/validation-checklist.md，**全部都要读**。
+  - unclassified 里的 tasks.md、约束清单等是关键上下文，不得跳过。
   
   按照规范完成：
   1. 设计用例（写入 qa/cases/<feature_id>/<id>.yml）

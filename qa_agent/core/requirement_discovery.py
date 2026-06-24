@@ -84,6 +84,11 @@ DESIGN_DOC_SEARCH_PATHS = [
     'ai-docs/architecture.md',
     'ai-docs/技术方案.md',
 
+    # spec-kit 框架（设计内容拆在 plan/data-model/research 三个文件里，没有单一 design.md）
+    'specs/*/plan.md',                       # Implementation Plan
+    'specs/*/data-model.md',                 # Data Model
+    'specs/*/research.md',                   # Technical Research
+
     # 项目根
     'DESIGN.md',
     'ARCHITECTURE.md',
@@ -352,8 +357,9 @@ DOC_CLASSIFY_KEYWORDS = {
     'acceptance': [
         # 英文
         'acceptance', 'criteria', 'gherkin', 'feature-file',
+        'validation', 'checklist', 'verification', 'quickstart',
         # 中文（acceptance 最先匹配，避免 '验收' 被 requirement 抢走）
-        '验收',
+        '验收', '校验', '检查清单', '检查表',
     ],
     'api': [
         # 英文
@@ -397,6 +403,7 @@ SPEC_KIT_FILENAMES = {
     'data-model': 'design',         # Data Model
     'research': 'design',           # Technical Research
     'quickstart': 'acceptance',     # Validation Guide
+    'validation-checklist': 'acceptance',  # Validation Checklist（验收检查清单）
     'tasks': 'unclassified',        # Task List（作为参考材料，不归入主分类）
 }
 
@@ -523,7 +530,8 @@ def classify_document(path: Path) -> str:
         return 'design'
     if parent_lower in ('api', 'apis', 'contracts', 'endpoints', '接口'):
         return 'api'
-    if parent_lower in ('acceptance', 'testing', 'verification', '验收', '测试'):
+    if parent_lower in ('acceptance', 'testing', 'verification', 'validation',
+                         'checklists', 'checklist', '验收', '测试', '检查清单'):
         return 'acceptance'
 
     # 排除明显非需求/设计的文件
