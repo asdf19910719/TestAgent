@@ -24,7 +24,8 @@ class ImpactAnalyzer:
         self,
         mode: Mode,
         all_cases: List[TestCase],
-        diff_base: str = 'HEAD~1'
+        diff_base: str = 'HEAD~1',
+        scope: str = None
     ) -> Dict[str, Any]:
         """
         执行影响面分析
@@ -34,6 +35,10 @@ class ImpactAnalyzer:
             'affected_symbols': List[str],
             'selected_cases': List[TestCase]
         }
+
+        Args:
+            scope: 本次运行范围（feature/module 名）。当 targets 匹配为空时，
+                   用作兜底——选中 feature_id 关联 scope 的用例。详见 _scope_fallback。
         """
         # L3 模式：选全部用例，不限于 diff（发版门必须覆盖全部功能）
         if mode == Mode.L3:
@@ -55,12 +60,12 @@ class ImpactAnalyzer:
 
         if self.mode == 'gitnexus':
             try:
-                return self._analyze_gitnexus(mode, all_cases, diff_base)
+                return self._analyze_gitnexus(mode, all_cases, diff_base, scope)
             except Exception as e:
                 fallback = self.config.get('impact_fallback', 'prompt')
                 if fallback == 'local':
                     print(f"⚠️ GitNexus 不可用: {e}. 回退到 local 模式")
-                    return self._analyze_local(mode, all_cases, diff_base)
+                    return self._analyze_local(mode, all_cases, diff_base, scope)
                 elif fallback == 'fail':
                     raise
                 else:
@@ -69,13 +74,14 @@ class ImpactAnalyzer:
                         f"请选择: 1) 等待修复 2) 切到 local 模式 3) 取消"
                     )
         else:
-            return self._analyze_local(mode, all_cases, diff_base)
+            return self._analyze_local(mode, all_cases, diff_base, scope)
 
     def _analyze_local(
         self,
         mode: Mode,
         all_cases: List[TestCase],
-        diff_base: str
+        diff_base: str,
+        scope: str = None
     ) -> Dict[str, Any]:
         """
         Local 模式：基于 git diff 文件名前缀匹配（规范 §8.2）
@@ -109,6 +115,11 @@ class ImpactAnalyzer:
             if c.priority.value in priority_filter
         ]
 
+        # 步骤 5: scope 兜底（targets 全空/无匹配时，按 scope 关联 feature）
+        final_selection = self._scope_fallback(
+            final_selection, all_cases, scope, priority_filter
+        )
+
         return {
             'mode': 'local',
             'diff_files': diff_files,
@@ -120,7 +131,8 @@ class ImpactAnalyzer:
         self,
         mode: Mode,
         all_cases: List[TestCase],
-        diff_base: str
+        diff_base: str,
+        scope: str = None
     ) -> Dict[str, Any]:
         """
         GitNexus 模式：基于代码图精确分析（规范 §8.1）
@@ -191,6 +203,11 @@ class ImpactAnalyzer:
         # 步骤 7: 最终选择
         final_selection = [c for c in (hit_cases + 补集) if c.priority.value in priority_filter]
 
+        # 步骤 8: scope 兜底（targets.symbols 全空/无匹配时，按 scope 关联 feature）
+        final_selection = self._scope_fallback(
+            final_selection, all_cases, scope, priority_filter
+        )
+
         return {
             'mode': 'gitnexus',
             'diff_files': diff_files,
@@ -240,6 +257,48 @@ class ImpactAnalyzer:
             Mode.L4: ['P0', 'P1']
         }
         return filters.get(mode, ['P0', 'P1', 'P2'])
+
+    def _scope_fallback(
+        self,
+        current_selection: List[TestCase],
+        all_cases: List[TestCase],
+        scope: str,
+        priority_filter: List[str]
+    ) -> List[TestCase]:
+        """
+        scope 兜底：当 targets 匹配为空导致 selection 为空时，按 scope 关联 feature。
+
+        背景：用例 YAML 缺 targets 字段时（Adapter/Indexer 未回填），
+        gitnexus/local 的 targets 匹配会全部落空 → selection=0 → 一条都不跑。
+        此时若用户给了明确 scope（feature/module 名），按 feature_id 关联兜底。
+
+        触发条件（两者都满足才兜底，避免误扩范围）：
+        1. current_selection 为空（正常 targets 匹配没选出任何用例）
+        2. scope 非空
+
+        匹配规则：feature_id == scope 或 scope 是 feature_id 的子串（宽松，
+        容忍 "订单" 匹配 "order-management" 之外的命名差异由调用方保证）。
+        仍受 priority_filter 和 state 约束，不会越权选 P3 或 retired 用例。
+        """
+        if current_selection or not scope:
+            return current_selection
+
+        scope_lower = scope.lower()
+        scope_cases = [
+            c for c in all_cases
+            if c.state.value in ('active', 'review')
+            and c.priority.value in priority_filter
+            and (c.feature_id == scope
+                 or scope_lower in c.feature_id.lower()
+                 or c.feature_id.lower() in scope_lower)
+        ]
+
+        if scope_cases:
+            print(
+                f"⚠️ targets 匹配为空（用例可能缺 targets 字段），"
+                f"按 scope '{scope}' 兜底选中 {len(scope_cases)} 条用例"
+            )
+        return scope_cases
 
     def _deduplicate(self, cases: List[TestCase]) -> List[TestCase]:
         """

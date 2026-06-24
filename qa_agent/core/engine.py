@@ -109,7 +109,7 @@ class Engine:
                 # 记录到 selection 中，让 Gatekeeper 能看到
                 self.state_manager.save_coverage_warning(reason, existing_tests)
 
-        impact_result = self.impact_analyzer.analyze(mode, all_cases)
+        impact_result = self.impact_analyzer.analyze(mode, all_cases, scope=scope)
 
         # 步骤 3: 应用用户覆盖
         if user_overrides:

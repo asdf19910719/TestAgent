@@ -364,7 +364,7 @@ def prepare(mode, scope, impact, docs_path):
     all_cases = engine._load_all_cases()
 
     # 影响面分析
-    impact_result = engine.impact_analyzer.analyze(Mode(mode), all_cases)
+    impact_result = engine.impact_analyzer.analyze(Mode(mode), all_cases, scope=scope)
 
     # 生成 run_id 和 selection.md
     run_id = engine._generate_run_id()
