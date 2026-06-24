@@ -147,21 +147,28 @@ def retry():
 
 
 @cli.command()
-@click.argument('verdict', default='PASS')
+@click.argument('verdict', required=False, default=None)
 @click.argument('pass_rate', default='')
 @click.option('--reason', '-r', default='', help='修复原因说明')
 @click.option('--fixes', '-f', multiple=True, help='修复内容（可多次指定）')
+@click.option('--passed-case', 'passed_cases', multiple=True,
+              help='本次已验证通过（重跑通过）的用例 ID，可多次指定。'
+                   '从失败清单中只移除这些，未验证的保留')
 @click.option('--check-only', is_flag=True, help='只检查状态一致性，不更新')
-def finalize(verdict, pass_rate, reason, fixes, check_only):
+def finalize(verdict, pass_rate, reason, fixes, passed_cases, check_only):
     """
     手动修复后更新状态（last.json + baseline.json + history.jsonl）
 
-    用途：当你手动修复测试后，使用此命令更新 QA Agent 的执行状态。
+    用途：会话中修复测试后，回写真实进度，供下次 /qa 读取最新状态。
+
+    ⚠️ verdict 不再默认 PASS。无 verdict 时进入「会话推导」提示模式，
+    要求调用方（qa.md finalize 流程）基于真实重跑证据传入推导出的 verdict
+    和 --passed-case，而不是凭空标 PASS。
 
     示例：
-      qa finalize PASS "40/40 (100%)" --reason "修复选择器"
+      qa finalize PASS "40/40 (100%)" --passed-case TC-A --passed-case TC-B
       qa finalize "CONDITIONAL PASS" "38/40 (95%)" -r "v53/v622 waived"
-      qa finalize  # 默认 PASS
+      qa finalize --check-only   # 仅检查一致性
     """
     from ..core.state_manager import StateManager
     from datetime import datetime
@@ -193,6 +200,23 @@ def finalize(verdict, pass_rate, reason, fixes, check_only):
     run_id = last_run.get('run_id', 'unknown')
     mode = last_run.get('mode', 'unknown')
 
+    # 2.5 verdict 缺省保护：不再凭空默认 PASS
+    if verdict is None:
+        existing_failures = (last_run.get('execution', {}) or {}).get('failures', []) or []
+        click.secho("\n⚠️  未提供 verdict，且 finalize 不再默认 PASS。", fg='yellow')
+        click.echo("   finalize 的正确用法是由 /qa finalize 流程基于会话真实状态推导：")
+        click.echo("   1. 读取下方失败清单")
+        click.echo("   2. 确认哪些用例已在本会话「重跑验证通过」")
+        click.echo("   3. 用 --passed-case 传入已验证通过的，并给出推导的 verdict")
+        if existing_failures:
+            click.echo(f"\n   当前 last.json 仍有 {len(existing_failures)} 个未解决失败:")
+            for f in existing_failures:
+                click.echo(f"     - {f.get('case_id', '?')}: {f.get('message', '')[:60]}")
+            click.echo("\n   未解决失败存在时，verdict 不应是 PASS。")
+        click.echo("\n   请显式传入 verdict，例如:")
+        click.echo('     qa finalize "CONDITIONAL PASS" "8/12 (67%)" --passed-case TC-A')
+        return
+
     # 3. 显示即将更新的内容
     click.echo(f"\n[QA Agent] 准备更新状态")
     click.echo(f"  Run ID: {run_id}")
@@ -200,6 +224,8 @@ def finalize(verdict, pass_rate, reason, fixes, check_only):
     click.echo(f"  判定: {verdict}")
     click.echo(f"  通过率: {pass_rate or '(未指定)'}")
     click.echo(f"  原因: {reason or '(未指定)'}")
+    if passed_cases:
+        click.echo(f"  本次验证通过: {', '.join(passed_cases)}")
     if fixes:
         click.echo(f"  修复内容:")
         for fix in fixes:
@@ -217,14 +243,15 @@ def finalize(verdict, pass_rate, reason, fixes, check_only):
     for i, fix in enumerate(fixes, 1):
         fixes_applied[f'fix_{i}'] = fix
 
-    # 6. 调用 finalize_after_manual_repair
+    # 6. 调用 finalize_after_manual_repair（增量移除已验证通过的，不再清空全部）
     try:
         sm.finalize_after_manual_repair(
             verdict=verdict,
             verdict_reason=reason or f'手动修复后判定为 {verdict}',
-            remaining_failures=[],  # TODO: 从用户输入解析
+            remaining_failures=None,  # 不显式覆盖；用 passed_case_ids 增量移除
             fixes_applied=fixes_applied if fixes_applied else None,
             pass_rate=pass_rate,
+            passed_case_ids=list(passed_cases) if passed_cases else None,
         )
 
         click.secho("\n✅ 状态已更新:", fg='green')

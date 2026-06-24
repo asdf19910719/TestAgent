@@ -435,40 +435,91 @@ python -m qa_agent.cli.main status
 
 ---
 
-## `/qa finalize` — 手动修复后状态更新 ⭐
+## `/qa finalize` — 会话感知的状态同步 ⭐
 
 ### 用途
 
-**当你手动修复测试后，使用此命令更新 QA Agent 的执行状态，防止下次启动读到陈旧数据。**
+**在同一会话窗口里修复测试后，根据会话上下文同步真实进度与状态**，供下次 `/qa` 读到最新状态。
 
-### 触发时机
+典型场景：
+```
+/qa module xxx  → 跑出 5 个 E2E 失败
+  ↓ [同一会话] 你让 AI 逐个修代码 + 重跑验证
+/qa finalize    → AI 根据会话上下文知道哪些已修复并重跑通过，
+                  增量更新 last.json 的真实进度（不是凭空标 PASS）
+```
 
-在以下场景手动修复测试后使用：
+### 核心原则（不可协商）
 
-1. **L3 CONDITIONAL PASS 后手动修复**
-   ```
-   Gatekeeper 判定: CONDITIONAL PASS
-   原因: 2 个 P0 E2E 失败 (v53/v622 为 harness 问题)
-   
-   [用户手动修复测试]
-   → /qa finalize PASS "39/40 (97.5%)"
-   ```
+1. **verdict 由真实状态推导，不默认 PASS**
+   - 还有未解决失败 → 至少 FAIL/CONDITIONAL，绝不 PASS
+   - 全部验证通过 → 才可 PASS
 
-2. **L3 FAIL 后手动修复部分用例**
-   ```
-   Gatekeeper 判定: FAIL
-   原因: 5 个 P0 失败
-   
-   [用户修复 3 个，剩余 2 个]
-   → /qa finalize "CONDITIONAL PASS" "38/40 (95%)"
-   ```
+2. **"改了代码" ≠ "测试通过"**（红线 6：修复后必须回归）
+   - 只有**本会话重跑过且通过**的用例，才能从失败清单移除
+   - 改了代码但没重跑的 E2E → **必须现场重跑**，不许凭"应该能过"标通过
 
-3. **任何模式执行后手动调整**
-   ```
-   /qa feature login → 执行完成
-   [用户发现问题，手动修复]
-   → /qa finalize PASS "10/10 (100%)"
-   ```
+3. **未验证的失败必须保留**，不许无条件清空失败清单
+
+### 强制执行流程
+
+**步骤 1：读取真实现状**
+```bash
+python -m qa_agent.cli.main finalize --check-only
+```
+读取 `qa/run/last.json` 的 `execution.failures`（当前未解决失败）、`selection.case_ids`（本次范围用例）。
+
+**步骤 2：从会话上下文归类每个失败用例**
+
+对 `execution.failures` 里每个用例，判断它在本会话的状态：
+
+| 会话中的状态 | 处理 |
+|---|---|
+| 已改代码 + **已重跑且通过**（会话里有执行证据） | 计入"已验证通过"，可移除 |
+| 已改代码 + **未重跑** | **现在必须重跑**（见步骤 3），跑过才算通过 |
+| 未处理 | 保留为失败 |
+
+**步骤 3：强制重跑"改了没跑"的用例**
+
+对所有"改了代码但本会话没重跑"的 E2E：
+- 按 qa-test-engineer.md 的"E2E 环境启动规则"启动环境
+- 重跑对应测试，拿到真实结果
+- 通过 → 归入已验证；仍失败 → 保留为失败
+- **禁止跳过这一步直接标通过**（违反红线 6）
+
+**步骤 4：推导 verdict + 重算 pass_rate**
+
+```
+已验证通过数 = 本会话重跑通过的用例数
+剩余失败数   = execution.failures - 已验证通过
+pass_rate    = (原通过 + 已验证通过) / 总数
+
+verdict 推导：
+- 剩余失败数 == 0 且全部有执行证据 → PASS
+- 剩余失败仅 P2/P3 且有 waiver      → CONDITIONAL PASS
+- 仍有 P0/P1 失败                   → FAIL
+- 环境/数据不可用无法验证            → BLOCKED
+```
+
+**步骤 5：回写（用推导值，传 --passed-case）**
+
+```bash
+python -m qa_agent.cli.main finalize "<推导的verdict>" "<重算的pass_rate>" \
+  --passed-case TC-A --passed-case TC-B \
+  --reason "<本会话修复+重跑说明>"
+```
+- `--passed-case` 只传**本会话重跑验证通过**的用例 ID
+- state_manager 会从失败清单**只移除这些**，未验证的自动保留
+- 不传 verdict 时 CLI 会拒绝并提示（防凭空 PASS）
+
+**步骤 6：输出推导依据给用户**
+
+```
+[QA finalize] 会话状态同步完成
+本会话验证通过: TC-A, TC-B, TC-C（已重跑，有执行证据）
+仍未解决:      TC-D (P0, 重跑仍失败), TC-E (未处理)
+通过率:        10/12 → verdict=FAIL（仍有 P0 失败 TC-D）
+```
 
 ### 命令格式
 
@@ -477,12 +528,14 @@ python -m qa_agent.cli.main status
 ```
 
 **参数**：
-- `verdict`: 可选，默认 `PASS`
-  - `PASS` — 全部通过
-  - `CONDITIONAL PASS` — 大部分通过，少量失败已 waive
-  - `FAIL` — 仍有失败需处理
-- `pass_rate`: 可选，通过率字符串，如 `"39/40 (97.5%)"`
-- `--reason`: 可选，修复原因说明
+- `verdict`: **推导得出，不可省略，不默认 PASS**（省略时 CLI 拒绝并提示）
+  - `PASS` — 全部验证通过（每项都有重跑证据）
+  - `CONDITIONAL PASS` — 大部分通过，剩余失败仅 P2/P3 且已 waive
+  - `FAIL` — 仍有 P0/P1 失败
+  - `BLOCKED` — 环境/数据不可用，无法验证
+- `pass_rate`: 重算的真实通过率，如 `"10/12 (83%)"`
+- `--passed-case`: 本会话重跑验证通过的用例 ID（可多次），只移除这些
+- `--reason`: 修复原因说明
 
 ### 示例
 
@@ -524,16 +577,22 @@ python -m qa_agent.cli.main status
 
 ---
 
-#### 示例 3：无参数（默认 PASS）
+#### 示例 3：无参数（不再默认 PASS，进入推导提示）
 
 ```bash
 /qa finalize
 ```
 
-等价于：
-```bash
-/qa finalize PASS
+不再等价于 PASS。CLI 会读取 `last.json`，若仍有未解决失败则拒绝凭空判定，并提示：
 ```
+⚠️  未提供 verdict，且 finalize 不再默认 PASS。
+当前 last.json 仍有 N 个未解决失败:
+  - TC-D: ...
+请基于会话真实状态推导 verdict 后再传入，例如:
+  qa finalize "CONDITIONAL PASS" "8/12 (67%)" --passed-case TC-A
+```
+
+正确做法是按上文"强制执行流程"推导后显式传值，而不是裸跑 `/qa finalize`。
 
 ---
 

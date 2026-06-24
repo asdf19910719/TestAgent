@@ -396,28 +396,28 @@ class StateManager:
         remaining_failures: list = None,
         fixes_applied: Dict[str, Any] = None,
         pass_rate: str = '',
+        passed_case_ids: list = None,
     ) -> None:
         """
-        手动修复完成后的状态回写助手
+        手动修复完成后的状态回写助手（会话感知）
 
         修复完成后必须调用此方法，确保 last.json + baseline.json + history.jsonl 一致。
 
+        失败清单更新逻辑（优先级从高到低）：
+        - 传 remaining_failures：直接用它作为修复后的失败清单（显式覆盖）
+        - 传 passed_case_ids：从现有 failures 中**只移除**已验证通过的，其余保留（增量）
+        - 都不传：保持现有 failures 不变（不动）
+
+        ⚠️ 不再无条件清空 failures。调用方（qa.md finalize 流程）必须基于真实
+        重跑证据，明确告知哪些用例已验证通过（passed_case_ids），未验证的保留。
+
         Args:
-            verdict: 'PASS' | 'CONDITIONAL PASS' | 'FAIL'
+            verdict: 'PASS' | 'CONDITIONAL PASS' | 'FAIL' | 'BLOCKED'
             verdict_reason: 判定原因
-            remaining_failures: 修复后剩余的失败列表
+            remaining_failures: 修复后剩余的失败列表（显式覆盖）
             fixes_applied: 修复内容字典
             pass_rate: 通过率字符串
-
-        使用示例：
-            sm = StateManager()
-            sm.finalize_after_manual_repair(
-                verdict='PASS',
-                verdict_reason='经过 3 轮手动修复，全部用例通过',
-                remaining_failures=[],
-                fixes_applied={'选择器修复': '更新 6 个 helper'},
-                pass_rate='39/40 (97.5%)',
-            )
+            passed_case_ids: 本次已验证通过（重跑通过）的用例 ID 列表（增量移除用）
         """
         last_run = self.load_last_run()
         if not last_run:
@@ -430,6 +430,7 @@ class StateManager:
 
         # 1. 更新 last.json
         last_run['status'] = 'completed'
+        last_run.setdefault('execution', {})
         last_run['execution']['end_time'] = now
 
         # 计算 duration
@@ -440,8 +441,18 @@ class StateManager:
         except Exception:
             pass
 
+        # 失败清单更新（不再无条件清空）
+        existing_failures = last_run['execution'].get('failures', []) or []
         if remaining_failures is not None:
             last_run['execution']['failures'] = remaining_failures
+        elif passed_case_ids:
+            passed_set = set(passed_case_ids)
+            kept = [f for f in existing_failures if f.get('case_id') not in passed_set]
+            removed = len(existing_failures) - len(kept)
+            last_run['execution']['failures'] = kept
+            print(f"[StateManager] 移除 {removed} 个已验证通过的失败，保留 {len(kept)} 个未解决")
+        # else：保持 existing_failures 不动
+
         if pass_rate:
             last_run['execution']['pass_rate'] = pass_rate
 
@@ -539,9 +550,21 @@ class StateManager:
             issues.append("last.json execution.end_time 为空，未正确结束")
 
         # 检查 4：gatekeeper_verdict 是否存在
-        verdict = last_run.get('gatekeeper_verdict')
-        if not verdict:
+        verdict_obj = last_run.get('gatekeeper_verdict')
+        if not verdict_obj:
             issues.append("last.json gatekeeper_verdict 未设置")
+
+        # 检查 5（实质校验）：verdict 与真实失败记录是否矛盾
+        # 防止「verdict=PASS 但 execution.failures 还有未解决失败」这种洗白状态
+        if verdict_obj:
+            verdict_str = verdict_obj.get('verdict', '')
+            failures = execution.get('failures', []) or []
+            if verdict_str == 'PASS' and failures:
+                fail_ids = [f.get('case_id', '?') for f in failures]
+                issues.append(
+                    f"verdict=PASS 但 execution.failures 非空（{len(failures)} 个未解决: "
+                    f"{', '.join(fail_ids)}）— 判定与真实状态矛盾"
+                )
 
         return {
             'consistent': len(issues) == 0,
