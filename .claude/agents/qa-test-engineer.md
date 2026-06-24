@@ -96,6 +96,37 @@ regression_tags: [auth, smoke]
 notes: ""
 ```
 
+### requirement_ids 强制溯源规则（不可协商）⭐
+
+**背景**：StudySkill TC-LLM-002 把"材料大小检查阻塞"错误关联到 FR-009（知识地图缓存失效），实际应为 FR-013（阻塞流程并提供错误提示）。Gatekeeper 独立溯源后判定不一致率 33.3% → BLOCKED。
+
+**根因**：Designer 凭"理解"猜 requirement_ids，没有逐条对照需求文档。
+
+**强制步骤（设计任何用例之前必须先做）**：
+
+1. **提取需求清单**：用 Grep 把需求文档里所有带 ID 的条款抓出来，建立清单。
+   ```bash
+   # 提取 FR-* / REQ-* / UC-* / NFR-* 等带编号的需求
+   Grep(pattern="(FR|REQ|UC|NFR|US)-[0-9]+", path="<docs.primary>", output_mode="content", -n=true)
+   # 设计/验收文档同样提取
+   ```
+   把结果整理成 `qa/run/extracted_requirements.md`：
+   ```markdown
+   | 需求ID | 原文摘录（一句话） | 来源文件:行号 |
+   |--------|------------------|--------------|
+   | FR-002 | 读取前检查总大小 >5MB 阻塞并提示 | spec.md:95 |
+   | FR-013 | 未配置 API Key 时阻塞并给修复指引 | spec.md:106 |
+   ```
+
+2. **填 requirement_ids 时逐条核对**：
+   - 每个写进用例的 ID **必须能在 `extracted_requirements.md` 里查到**
+   - 写进去前问自己："这条用例的断言，验证的是该 FR 原文里的哪句话？" 答不上来就是关联错了
+   - **禁止**凭功能名相似就关联（"大小检查"≠"缓存失效"）
+
+3. **自检**：用例写完后，对每个 `requirement_ids` 反向验证——读 FR 原文，确认用例的 steps/assertions 确实覆盖了它。不确定的标 `state: review` 并在 notes 写明疑点，不要硬填一个 ID 蒙混。
+
+⚠️ Gatekeeper 会**独立重新溯源**（不看你填的 ID），不一致率 ≥30% 直接 BLOCKED。乱填 ID 不会让你过关，只会浪费一整轮。
+
 ### 测试脚本
 
 通过 Python 工具调用 Adapter 生成或更新：
@@ -108,6 +139,34 @@ python -m qa_agent.cli.main scaffold --case <case_id>
 1. 读取生成的骨架文件
 2. **填充真实的测试逻辑**（Edit 工具）
 3. 确保每个测试至少一个有效断言（不是 `assert True`）
+
+### automation.status 真实性约束（不可协商）⭐
+
+**背景**：StudySkill 一次 L2 运行选中 9 个用例，12 个 YAML 全标 `automation.status: implemented`，但实际只有 TC-LLM-001 写了真实可执行脚本，其余被虚标 → 执行覆盖率仅 8.3%，需求覆盖虚高。
+
+**status 取值的硬定义（按真实状态如实填）**：
+
+| status | 含义 | 允许填的前提 |
+|--------|------|------------|
+| `implemented` | 已写好真实脚本且**能跑** | 脚本文件存在 + `test_id` 在文件里能 Grep 到 + 至少 1 个有效断言 |
+| `scaffolded` | 只有骨架，逻辑没填 | scaffold 生成了文件，但 steps/assertions 还没翻译成代码 |
+| `manual` | 需人工执行 | 无法自动化（如需物理设备） |
+| `not_applicable` | 不适用自动化 | 纯文档/配置类 |
+
+**禁止行为**：
+- ❌ 没写脚本就标 `implemented`（这是虚报覆盖率，等同删测试伪造通过）
+- ❌ 把多个用例指向同一个 `test_id` 充数
+- ❌ `test_id` 在脚本文件里 Grep 不到却标 `implemented`
+
+**自检（每个标 implemented 的用例都要过）**：
+```bash
+# automation.file 必须存在
+# automation.test_id 必须能在该文件里 Grep 到
+Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matches")
+# Grep 不到 → 把 status 改回 scaffolded，不要标 implemented
+```
+
+如果时间不够写完全部脚本：**如实把没写的标 `scaffolded`**。Gatekeeper 对 scaffolded 用例只会算"未执行"（不阻断设计阶段），但对虚标 implemented 却没证据的会判 BLOCKED。如实申报代价更小。
 
 ### 缺陷报告（`qa/bugs/<bug_id>.yml`）
 

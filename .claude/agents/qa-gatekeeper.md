@@ -129,6 +129,43 @@ Read qa/run/TC-E2E-001.log
 - 如果 > 30% 的 E2E 用例无证据 → BLOCKED（"大量假 E2E，未真实验证用户行为"）
 - 如果 ≤ 30% 无证据 → CONDITIONAL PASS（"部分 E2E 证据缺失，建议复核"）
 
+### 8. 选中即执行一致性（防止虚标 implemented + 覆盖率虚高）⭐
+
+- ❌ **selection 选中 N 条，实际执行远少于 N（且无正当跳过理由）→ BLOCKED**
+  - **背景**：StudySkill L2 运行选中 9 条，实际只跑通 1 条（8.3%），其余 11 条 YAML 标 `automation.status: implemented` 但根本没有可执行脚本 → 需求覆盖虚高到不可信
+  - **根因**：Designer 虚标 `implemented`，selection 把它们当成可执行用例选进来，Runner 却跑不了
+
+#### 具体检查步骤：
+
+1. 读取 `qa/run/last.json` 的 `selection.case_ids`（本次选中的用例）
+2. 读取 `execution`（实际执行结果）
+3. 计算执行率：`已执行数 / selection.total`
+4. **对每个标 `automation.status: implemented` 的选中用例，验证脚本真实性**：
+   ```bash
+   # 用例 YAML 里的 automation.file 是否存在
+   # automation.test_id 是否能在该文件里 Grep 到
+   Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matches")
+   ```
+5. 统计"标 implemented 但 test_id 查不到"的用例数（= 虚标数）
+
+**判定规则**：
+
+| 情况 | 判定 |
+|---|---|
+| 虚标数 = 0 且执行率 ≥ 80% | 不影响判定 |
+| 虚标数 > 0 | BLOCKED（"N 个用例虚标 implemented，实际无可执行脚本"，列出 case_ids） |
+| 执行率 < 50% 且跳过用例无明确环境/数据原因 | BLOCKED（"执行覆盖严重不足，selection 与实际执行不一致"） |
+| 50% ≤ 执行率 < 80% 且跳过有正当理由 | CONDITIONAL PASS（登记未执行用例） |
+
+**输出示例**：
+```
+selection 选中: 9 条
+实际执行: 1 条（11%）
+虚标 implemented: TC-LLM-003/004/005/007/008/009/010（test_id 在脚本文件中查不到）
+结论: BLOCKED — 7 个用例虚标 implemented，需求覆盖率不可信
+建议: Designer 把未写脚本的用例如实改为 scaffolded，或补齐脚本后重跑
+```
+
 ## 独立性约束（强制）
 
 ⚠️ **你不能看到 Designer+Runner 的推理过程**。你只能基于：
@@ -375,6 +412,12 @@ P0 E2E 跳过 → 必须质疑："为什么 LLM 超时？有没有尝试 mock？
    - 搜索日志文件中的 "404"/"500"/"Error"/"Uncaught"/"白屏"
    - 找到任何一个 → FAIL
 
+6. ✅ **选中即执行一致性检查（硬规则 8）**
+   - 对 `selection.case_ids` 里每个标 `automation.status: implemented` 的用例
+   - Grep 验证 `automation.test_id` 在 `automation.file` 中真实存在
+   - 虚标数 > 0 → BLOCKED；执行率 < 50% 无正当理由 → BLOCKED
+   - 输出：`{case_ids} 虚标 implemented，实际无可执行脚本`
+
 **常规检查**（硬规则通过后）：
 
 - 失败用例数
@@ -512,6 +555,7 @@ metadata:
 - manual 用例无人签字
 - waivers 过期
 - requirement_ids 不一致 ≥ 30%（Designer 质量严重不达标）
+- 选中用例虚标 implemented（test_id 查不到）或执行率 < 50% 无正当理由（硬规则 8）
 - 反向梳理产物未签字（`qa/signoff/requirements.signed` 不存在）
 
 ### 步骤 6：必填字段（不允许空）
