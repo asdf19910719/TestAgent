@@ -255,13 +255,59 @@ class MobileAdapter:
         else:
             raise NotImplementedError(f"未支持的子类型：{subtype}")
 
+    def _detect_android_package(self) -> str:
+        """
+        自动检测 Android 项目真实包名
+        优先级: AndroidManifest.xml > build.gradle > 'com.example.app' 回退
+        """
+        import re
+        # 方法1: 读 AndroidManifest.xml 的 package 属性
+        manifest_paths = [
+            self.cwd / 'app' / 'src' / 'main' / 'AndroidManifest.xml',
+            self.cwd / 'AndroidManifest.xml',
+        ]
+        for manifest in manifest_paths:
+            if manifest.exists():
+                try:
+                    content = manifest.read_text(encoding='utf-8')
+                    match = re.search(r'<manifest[^>]+package\s*=\s*["\']([^"\']+)["\']', content)
+                    if match:
+                        pkg = match.group(1)
+                        print(f"[MobileAdapter] 从 {manifest.name} 检测到包名: {pkg}")
+                        return pkg
+                except Exception as e:
+                    print(f"[MobileAdapter] 读取 {manifest} 失败: {e}")
+
+        # 方法2: 读 build.gradle(app) 的 applicationId
+        gradle_paths = [
+            self.cwd / 'app' / 'build.gradle',
+            self.cwd / 'app' / 'build.gradle.kts',
+        ]
+        for gradle in gradle_paths:
+            if gradle.exists():
+                try:
+                    content = gradle.read_text(encoding='utf-8')
+                    # Groovy: applicationId "xxx" 或 Kotlin: applicationId = "xxx"
+                    match = re.search(r'applicationId\s*[="]?\s*["\']([^"\']+)["\']', content)
+                    if match:
+                        pkg = match.group(1)
+                        print(f"[MobileAdapter] 从 {gradle.name} 检测到包名: {pkg}")
+                        return pkg
+                except Exception as e:
+                    print(f"[MobileAdapter] 读取 {gradle} 失败: {e}")
+
+        # 回退: 无法检测时返回通用包名（会导致路径错误，但比崩溃强）
+        print("[MobileAdapter] ⚠️  无法检测真实包名，使用回退值 'com.example.app'")
+        print("    建议检查 AndroidManifest.xml 或 app/build.gradle 是否存在")
+        return 'com.example.app'
+
     def _generate_android(self, case: TestCase) -> str:
         """Android JUnit/Espresso 骨架"""
         is_ui = case.level.value in ('system', 'acceptance')
         test_dir = 'app/src/androidTest/java' if is_ui else 'app/src/test/java'
 
         class_name = ''.join(w.capitalize() for w in case.id.replace('-', '_').split('_'))
-        package = 'com.example.app'  # 用户应根据项目调整
+        package = self._detect_android_package()  # 自动检测真实包名
 
         if is_ui:
             content = f"""package {package};
