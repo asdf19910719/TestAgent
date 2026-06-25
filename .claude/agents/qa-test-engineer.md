@@ -179,9 +179,10 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 
 5. **自检填充完整性**（填完必须过）：
    ```bash
-   # 脚本里不应再有任何 @AI-FILL 或 TODO 残留
-   Grep(pattern="@AI-FILL|TODO", path="<脚本路径>")
-   # 如果还有匹配 → 没填完，继续填，不许交付半成品
+   # 用 CLI 静态校验(查 val 重复/import 缺失/括号不配平/@AI-FILL 残留)
+   python -m qa_agent.cli.main validate-kotlin --path "<脚本路径>" --fail-on-warning
+   # 退出码非 0 → 有 error(编译阻塞)或 @AI-FILL/TODO 残留(未填完)
+   # 必须修到退出码 0 才可标 implemented，不许交付半成品
    ```
 
 **填不出来时怎么办**（极少数情况）：

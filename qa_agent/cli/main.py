@@ -503,6 +503,62 @@ def scaffold(case_id):
         }, ensure_ascii=False))
 
 
+@cli.command(name='validate-kotlin')
+@click.option('--path', 'paths', multiple=True, help='要校验的 .kt 文件路径(可多次)')
+@click.option('--glob', 'glob_pattern', default=None,
+              help='glob 模式批量校验(如 "app/src/**/*.kt")')
+@click.option('--fail-on-warning', is_flag=True,
+              help='有 warning 也返回非 0(默认仅 error 失败)')
+def validate_kotlin(paths, glob_pattern, fail_on_warning):
+    """
+    [Subagent 用] 静态校验生成的 Kotlin 测试代码结构
+
+    无需 JDK/Android SDK，拦截编译阻塞类 bug：
+    - val/var 重复声明、import 缺前缀、括号不配平
+    - @AI-FILL/TODO 残留、空测试方法体(warning)
+
+    用法：
+      qa validate-kotlin --path app/src/test/.../TcXxx.kt
+      qa validate-kotlin --glob "app/src/**/Tc*.kt"
+    """
+    from ..adapters.mobile.kotlin_validator import KotlinStructureValidator
+
+    # 收集待校验文件
+    files = list(paths)
+    if glob_pattern:
+        files.extend(str(p) for p in Path('.').glob(glob_pattern))
+    if not files:
+        click.echo("❌ 未指定文件(用 --path 或 --glob)", err=True)
+        sys.exit(2)
+
+    validator = KotlinStructureValidator()
+    results = []
+    total_errors = 0
+    total_warnings = 0
+
+    for fpath in files:
+        p = Path(fpath)
+        if not p.exists():
+            results.append({'file': fpath, 'ok': False, 'errors': ['文件不存在'], 'warnings': []})
+            total_errors += 1
+            continue
+        content = p.read_text(encoding='utf-8')
+        r = validator.validate(content)
+        results.append({'file': fpath, **r})
+        total_errors += len(r['errors'])
+        total_warnings += len(r['warnings'])
+
+    click.echo(json.dumps({
+        'total_files': len(files),
+        'total_errors': total_errors,
+        'total_warnings': total_warnings,
+        'results': results,
+    }, ensure_ascii=False, indent=2))
+
+    if total_errors > 0 or (fail_on_warning and total_warnings > 0):
+        sys.exit(1)
+
+
 @cli.command(name='execute')
 @click.option('--selection', 'selection_path', default='qa/run/selection.md',
               help='selection.md 路径')

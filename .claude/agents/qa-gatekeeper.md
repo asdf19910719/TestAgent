@@ -175,11 +175,13 @@ selection 选中: 9 条
 #### 具体检查步骤：
 
 1. 对每个标 `automation.status: implemented` 的用例，读其 `automation.file`
-2. Grep 检查填充残留：
+2. 用 CLI 静态校验(同时查填充残留 + 编译阻塞类结构 bug)：
    ```bash
-   Grep(pattern="@AI-FILL|TODO\\[必填\\]|TODO:", path="<automation.file>", output_mode="content", -n=true)
+   python -m qa_agent.cli.main validate-kotlin --path "<automation.file>" --fail-on-warning
+   # error(val重复/import缺失/括号不配平) 或 warning(@AI-FILL/TODO残留) → 退出码非0
    ```
-3. 统计有残留的脚本数
+   也可批量：`--glob "app/src/**/Tc*.kt"`
+3. 统计有 error 或 @AI-FILL 残留的脚本数
 
 **判定规则**：
 
