@@ -360,21 +360,37 @@ class MobileAdapter:
         print("    建议检查 AndroidManifest.xml 或 app/build.gradle 是否存在")
         return 'com.example.app'
 
-    def _build_fill_directive(self, case, target_files: list, target_symbols: list) -> str:
+    def _build_fill_directive(self, case, target_files: list, target_symbols: list, test_dir: str = '') -> str:
         """
         构建 AI 填充指令块(机器可读,指引 Designer 读源码生成真实代码)
 
         这是"完全自动化"的核心:Adapter 生成骨架时不留死 TODO,而是留下
         结构化指令,告诉 Designer(LLM):读哪些源码、理解哪些方法、填什么。
         Designer 阶段会扫描这些 @AI-FILL 标记并完成填充。
+
+        Args:
+            test_dir: 当前生成目录(androidTest=instrumented / test=unit)，
+                      用于告知 Designer 源集位置 + 何时需迁移
         """
         files_block = '\n'.join(f'    //   - {f}' for f in target_files) or '    //   (无 targets.files,需从 feature 源码推断)'
         symbols_block = '\n'.join(f'    //   - {s}' for s in target_symbols) or '    //   (无 targets.symbols)'
+
+        is_androidtest = 'androidTest' in test_dir
+        relocate_hint = (
+            "    // ║  5. 当前在 androidTest(instrumented,设备/CI模拟器)源集。\n"
+            "    // ║     若填充需要 mock 框架(MockK等)但它只在 testImplementation,\n"
+            "    // ║     且 Robolectric 的 shadow 能满足(多数 ContactsContract 场景),\n"
+            "    // ║     则把本文件迁到 app/src/test/kotlin/ 并改用 RobolectricTestRunner\n"
+            if is_androidtest else
+            "    // ║  5. 当前在 test(unit/Robolectric)源集,testImplementation 的\n"
+            "    // ║     mock 框架可用。若必须真设备能力,迁到 app/src/androidTest/kotlin/\n"
+        )
 
         return f"""    // ╔══════════════════════════════════════════════════════════════╗
     // ║ @AI-FILL-SPEC  本文件含待 AI 填充的 @AI-FILL 标记                ║
     // ║ Designer 必须读下列源码后，把 @AI-FILL:arrange/act 替换为真实代码 ║
     // ╠══════════════════════════════════════════════════════════════╣
+    // ║ 当前源集目录: {test_dir or '(未知)'}
     // ║ 待读源码(targets.files):
 {files_block}
     // ║ 待理解方法(targets.symbols):
@@ -387,7 +403,7 @@ class MobileAdapter:
     // ║     异步),生成正确调用 + 必要的等待(IdlingResource/CountDownLatch)
     // ║  3. 找不到现成 mock 设施时，生成最小可用的，并保持与项目风格一致
     // ║  4. 填充完成后删除对应 @AI-FILL 标记
-    // ╚══════════════════════════════════════════════════════════════╝"""
+{relocate_hint}    // ╚══════════════════════════════════════════════════════════════╝"""
 
     def _generate_android(self, case: TestCase) -> str:
         """Android instrumented 测试生成(带真实断言 + AI 填充指令)"""
@@ -427,7 +443,7 @@ class MobileAdapter:
         target_symbols = case.targets.get('symbols', []) if case.targets else []
 
         # AI 填充指令块(机器可读,指引 Designer 读源码生成真实代码)
-        fill_directive = self._build_fill_directive(case, target_files, target_symbols)
+        fill_directive = self._build_fill_directive(case, target_files, target_symbols, test_dir)
 
         # 生成 preconditions 提示(AI 填充)
         precond_todos = []
