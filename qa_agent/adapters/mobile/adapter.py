@@ -240,12 +240,24 @@ class MobileAdapter:
 
     def generate(self, case: TestCase) -> str:
         """
-        生成测试脚本骨架
+        生成测试脚本(智能路由)
+
+        根据用例特征选择最合适的工具:
+        - 有 database/log 断言 → Espresso instrumented(精确验证)
+        - 纯 UI 流程,无后台断言 → Maestro(确定性高、YAML 简洁)
+        - 显式标记 ui_complexity=dynamic → Midscene(未来)
         """
         subtype = self._project_subtype or 'android'
 
         if subtype == 'android':
-            return self._generate_android(case)
+            tool = self._select_android_tool(case)
+            if tool == 'espresso':
+                return self._generate_android(case)
+            elif tool == 'maestro':
+                return self._generate_maestro(case)
+            else:
+                # 默认回退
+                return self._generate_android(case)
         elif subtype == 'ios':
             return self._generate_ios(case)
         elif subtype == 'flutter':
@@ -254,6 +266,42 @@ class MobileAdapter:
             return self._generate_react_native(case)
         else:
             raise NotImplementedError(f"未支持的子类型：{subtype}")
+
+    def _select_android_tool(self, case: TestCase) -> str:
+        """
+        为 Android 用例选择测试工具
+
+        Returns:
+            'espresso' | 'maestro' | 'robolectric'
+        """
+        # 规则1: 有 database/log 断言 → Espresso(需访问后台)
+        if case.assertions:
+            assertion_types = {a.get('type') for a in case.assertions if isinstance(a, dict)}
+            if 'database' in assertion_types or 'log' in assertion_types:
+                print(f"[MobileAdapter] {case.id}: 检测到 database/log 断言 → Espresso")
+                return 'espresso'
+
+        # 规则2: unit 层 → Robolectric(未来)
+        if case.level.value == 'unit':
+            print(f"[MobileAdapter] {case.id}: unit 层 → Robolectric(暂用 Espresso)")
+            return 'espresso'  # TODO: 第三期改成 robolectric
+
+        # 规则3: system/acceptance 纯 UI 流程 → Maestro
+        if case.level.value in ('system', 'acceptance'):
+            print(f"[MobileAdapter] {case.id}: system 层纯 UI → Maestro")
+            return 'maestro'
+
+        # 默认: Espresso
+        print(f"[MobileAdapter] {case.id}: 默认 → Espresso")
+        return 'espresso'
+
+    def _generate_maestro(self, case: TestCase) -> str:
+        """生成 Maestro flow YAML"""
+        from ..maestro import MaestroAdapter
+
+        package = self._detect_android_package()
+        adapter = MaestroAdapter(self.cwd)
+        return adapter.generate(case, package)
 
     def _detect_android_package(self) -> str:
         """
