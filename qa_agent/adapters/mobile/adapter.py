@@ -345,7 +345,7 @@ class MobileAdapter:
                     print(f"[MobileAdapter] 读取 {gradle} 失败: {e}")
 
         # 回退: 无法检测时返回通用包名（会导致路径错误，但比崩溃强）
-        print("[MobileAdapter] ⚠️  无法检测真实包名，使用回退值 'com.example.app'")
+        print("[MobileAdapter] WARNING: 无法检测真实包名，使用回退值 'com.example.app'")
         print("    建议检查 AndroidManifest.xml 或 app/build.gradle 是否存在")
         return 'com.example.app'
 
