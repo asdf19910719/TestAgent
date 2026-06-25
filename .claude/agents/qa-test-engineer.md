@@ -135,10 +135,66 @@ notes: ""
 python -m qa_agent.cli.main scaffold --case <case_id>
 ```
 
-**注意**：Adapter 默认生成的是骨架，你需要：
-1. 读取生成的骨架文件
-2. **填充真实的测试逻辑**（Edit 工具）
-3. 确保每个测试至少一个有效断言（不是 `assert True`）
+Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
+- ✅ Assert 部分：Adapter 已自动生成真实断言代码（ContentResolver/Logcat 等）
+- 🤖 Arrange/Act 部分：标记为 `@AI-FILL`，**由你（Designer）读源码后自动填充**
+
+### @AI-FILL 自动填充流程（强制，不可留 TODO 给人）⭐
+
+**目标：完全自动化。生成的脚本必须是可直接执行的真实代码，不允许把 `@AI-FILL` 或 `TODO` 留给用户手填。**
+
+**背景**：移动端测试的 Arrange（mock 数据）/Act（调用方法）依赖项目架构，
+不在用例 yml 里。但这些信息**在项目源码里**——用例的 `targets.files`/`targets.symbols`
+已标注了该读哪些源码。你的职责就是读源码、推断模式、生成真实代码。
+
+**强制步骤（每个含 `@AI-FILL` 标记的脚本都要做）**：
+
+1. **扫描填充标记**：生成脚本后，Grep `@AI-FILL` 找出所有待填位置
+   ```bash
+   Grep(pattern="@AI-FILL", path="<生成的脚本路径>", output_mode="content", -n=true)
+   ```
+
+2. **读 targets 源码**：脚本顶部 `@AI-FILL-SPEC` 块列了 `targets.files`/`targets.symbols`
+   ```bash
+   # 读被测方法的真实签名、参数、返回值、是否单例/需注入
+   Read(<targets.files 里的每个文件>)
+   # 理解 targets.symbols 指向的方法怎么调用
+   ```
+
+3. **侦察项目测试设施**（决定 arrange 怎么写）：
+   ```bash
+   # 找项目已有的测试，学它们用什么 mock/DI 模式
+   Glob(pattern="**/src/*Test*/**/*.kt")
+   Grep(pattern="MockWebServer|@HiltAndroidTest|Robolectric|@Before|TestBase", ...)
+   ```
+   - 有 MockWebServer → 用它 mock HTTP
+   - 有 Hilt 测试模块 → 注入 fake 依赖
+   - 有测试基类 → 继承复用其工具方法
+   - 都没有 → 生成最小可用的 mock，风格对齐项目
+
+4. **替换 @AI-FILL 为真实代码**（Edit 工具）：
+   - `@AI-FILL:arrange` → 真实的数据准备代码（mock 云端/塞本地数据）
+   - `@AI-FILL:act` → 真实的方法调用（按源码签名）+ 异步等待
+   - 删除所有 `@AI-FILL` 标记和 `@AI-FILL-SPEC` 块
+
+5. **自检填充完整性**（填完必须过）：
+   ```bash
+   # 脚本里不应再有任何 @AI-FILL 或 TODO 残留
+   Grep(pattern="@AI-FILL|TODO", path="<脚本路径>")
+   # 如果还有匹配 → 没填完，继续填，不许交付半成品
+   ```
+
+**填不出来时怎么办**（极少数情况）：
+- 源码缺失/方法签名读不懂 → **继续读更多相关文件**（调用链、接口定义），不要轻易放弃
+- 确实需要物理设备/外部系统才能 mock → 标 `automation.status: manual` 并在 notes 写明**具体**阻塞原因（不是"需要手填"这种甩锅）
+- **禁止**：留 `@AI-FILL`/`TODO` 就标 `implemented`，或丢给用户"需手动补充"
+
+**注意**：Adapter 默认生成半成品，你需要：
+1. 读取生成的脚本 + 扫描 `@AI-FILL` 标记
+2. 读 targets 源码 + 侦察测试设施
+3. **自动填充真实测试逻辑**（Edit 工具，不留 TODO）
+4. 确保每个测试至少一个有效断言（不是 `assert True`）
+5. 自检无 `@AI-FILL`/`TODO` 残留后，才可标 `implemented`
 
 ### automation.status 真实性约束（不可协商）⭐
 

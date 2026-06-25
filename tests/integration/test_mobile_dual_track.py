@@ -95,9 +95,13 @@ def test_generate_integration_with_database_assertions(mock_android_project):
     assert 'assertEquals(3,' in content, "应生成精确断言"
     assert 'assertLogContains' in content, "应生成日志断言方法"
 
-    # 验证 TODO 提示(前置条件)
-    assert 'TODO[必填]:' in content, "应生成前置条件提示"
-    assert '云端通讯录有 3 个联系人' in content, "应包含具体前置条件"
+    # 验证 AI 填充指令(替代旧的死 TODO)
+    assert '@AI-FILL' in content, "应生成 AI 填充指令标记"
+    assert '@AI-FILL-SPEC' in content, "应包含填充规格块"
+    assert 'targets.files' in content, "填充指令应引用 targets 源码锚点"
+    assert '云端通讯录有 3 个联系人' in content, "应包含具体前置条件需求"
+    # 验证 targets 源码路径被写入指令(供 AI 读取)
+    assert 'GatewayService' in content or 'targets' in content, "应包含源码锚点供 AI 填充"
 
     print(f"\nOK Espresso 生成测试通过")
     print(f"生成路径: {result_path}")

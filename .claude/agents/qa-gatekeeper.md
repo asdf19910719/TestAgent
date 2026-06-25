@@ -166,6 +166,38 @@ selection 选中: 9 条
 建议: Designer 把未写脚本的用例如实改为 scaffolded，或补齐脚本后重跑
 ```
 
+### 9. AI 填充完整性（防止交付半成品脚本）⭐
+
+- ❌ **标 `implemented` 的脚本里仍残留 `@AI-FILL` / `TODO` → BLOCKED**
+  - **背景**：移动端 Adapter 生成的脚本含 `@AI-FILL:arrange/act` 标记，Designer 必须读源码后替换为真实代码。如果留着标记就标 implemented，等于交付半成品（Arrange/Act 是空的，测试跑了也没真正验证）。
+  - **根因**：Designer 偷懒，没完成 @AI-FILL 自动填充流程，把"该填的"丢给用户
+
+#### 具体检查步骤：
+
+1. 对每个标 `automation.status: implemented` 的用例，读其 `automation.file`
+2. Grep 检查填充残留：
+   ```bash
+   Grep(pattern="@AI-FILL|TODO\\[必填\\]|TODO:", path="<automation.file>", output_mode="content", -n=true)
+   ```
+3. 统计有残留的脚本数
+
+**判定规则**：
+
+| 情况 | 判定 |
+|---|---|
+| 无残留 | 不影响判定 |
+| 有 `@AI-FILL` 残留 | BLOCKED（"脚本未完成 AI 填充，Arrange/Act 为空，列出 case_ids"） |
+| 仅有解释性 TODO（非 @AI-FILL，且 Arrange/Act 已实现） | CONDITIONAL PASS（提示复核） |
+
+**输出示例**：
+```
+检查填充完整性:
+  TC-CONTACT-001.kt: 残留 2 处 @AI-FILL:arrange → 数据准备未填
+  TC-CONTACT-003.kt: 残留 1 处 @AI-FILL:act → 方法调用未填
+结论: BLOCKED — 2 个脚本标 implemented 但 AI 填充未完成
+建议: Designer 读 targets 源码完成填充，或如实改为 scaffolded
+```
+
 ## 独立性约束（强制）
 
 ⚠️ **你不能看到 Designer+Runner 的推理过程**。你只能基于：

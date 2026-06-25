@@ -360,8 +360,37 @@ class MobileAdapter:
         print("    建议检查 AndroidManifest.xml 或 app/build.gradle 是否存在")
         return 'com.example.app'
 
+    def _build_fill_directive(self, case, target_files: list, target_symbols: list) -> str:
+        """
+        构建 AI 填充指令块(机器可读,指引 Designer 读源码生成真实代码)
+
+        这是"完全自动化"的核心:Adapter 生成骨架时不留死 TODO,而是留下
+        结构化指令,告诉 Designer(LLM):读哪些源码、理解哪些方法、填什么。
+        Designer 阶段会扫描这些 @AI-FILL 标记并完成填充。
+        """
+        files_block = '\n'.join(f'    //   - {f}' for f in target_files) or '    //   (无 targets.files,需从 feature 源码推断)'
+        symbols_block = '\n'.join(f'    //   - {s}' for s in target_symbols) or '    //   (无 targets.symbols)'
+
+        return f"""    // ╔══════════════════════════════════════════════════════════════╗
+    // ║ @AI-FILL-SPEC  本文件含待 AI 填充的 @AI-FILL 标记                ║
+    // ║ Designer 必须读下列源码后，把 @AI-FILL:arrange/act 替换为真实代码 ║
+    // ╠══════════════════════════════════════════════════════════════╣
+    // ║ 待读源码(targets.files):
+{files_block}
+    // ║ 待理解方法(targets.symbols):
+{symbols_block}
+    // ║
+    // ║ 填充规则:
+    // ║  1. arrange: 按需求准备数据。先在源码/已有测试里找项目用的 mock/DI
+    // ║     方式(MockWebServer? Hilt? Room? 测试基类?),复用同款模式
+    // ║  2. act: 读 symbols 的真实方法签名(是否单例/需注入/Intent 触发/
+    // ║     异步),生成正确调用 + 必要的等待(IdlingResource/CountDownLatch)
+    // ║  3. 找不到现成 mock 设施时，生成最小可用的，并保持与项目风格一致
+    // ║  4. 填充完成后删除对应 @AI-FILL 标记
+    // ╚══════════════════════════════════════════════════════════════╝"""
+
     def _generate_android(self, case: TestCase) -> str:
-        """Android instrumented 测试生成(带真实断言)"""
+        """Android instrumented 测试生成(带真实断言 + AI 填充指令)"""
         from .assertion_translator import AssertionTranslator
 
         # 判断测试目录:instrumented(需设备) vs unit(Robolectric)
@@ -389,18 +418,27 @@ class MobileAdapter:
         steps_comment = '\n'.join(f'     * - {s}' for s in case.steps)
         expected_comment = '\n'.join(f'     * - {e}' for e in case.expected)
 
-        # 生成 preconditions 提示(需要用户手动填充)
+        # 提取 targets 作为 AI 填充的源码锚点
+        target_files = case.targets.get('files', []) if case.targets else []
+        target_symbols = case.targets.get('symbols', []) if case.targets else []
+
+        # AI 填充指令块(机器可读,指引 Designer 读源码生成真实代码)
+        fill_directive = self._build_fill_directive(case, target_files, target_symbols)
+
+        # 生成 preconditions 提示(AI 填充)
         precond_todos = []
         if case.preconditions:
-            precond_todos.append('        // === Arrange: 准备测试数据(需手动补充) ===')
+            precond_todos.append('        // === Arrange: 准备测试数据 ===')
+            precond_todos.append('        // @AI-FILL:arrange — 读上述 targets 源码，生成真实数据准备代码')
             for precond in case.preconditions:
-                precond_todos.append(f'        // TODO[必填]: {precond}')
+                precond_todos.append(f'        // 需求: {precond}')
             precond_todos.append('')
 
-        # Act 部分(从 steps 生成提示)
+        # Act 部分(AI 填充)
         act_todos = ['        // === Act: 执行操作 ===']
+        act_todos.append('        // @AI-FILL:act — 读 targets.symbols 的方法签名，生成真实调用代码')
         for step in case.steps:
-            act_todos.append(f'        // TODO: {step}')
+            act_todos.append(f'        // 步骤: {step}')
         act_todos.append('')
 
         # Assert 部分(真实生成的断言代码)
@@ -429,6 +467,7 @@ class MobileAdapter:
  */
 @RunWith(AndroidJUnit4::class)
 class {class_name} {{
+{fill_directive}
     @Test
     fun test_{case.id.lower().replace('-', '_')}() {{
 {chr(10).join(precond_todos)}
