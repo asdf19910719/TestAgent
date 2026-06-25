@@ -244,6 +244,7 @@ class MobileAdapter:
 
         根据用例特征选择最合适的工具:
         - 有 database/log 断言 → Espresso instrumented(精确验证)
+        - unit 层 → Robolectric(无需设备,秒级执行)
         - 纯 UI 流程,无后台断言 → Maestro(确定性高、YAML 简洁)
         - 显式标记 ui_complexity=dynamic → Midscene(未来)
         """
@@ -255,6 +256,8 @@ class MobileAdapter:
                 return self._generate_android(case)
             elif tool == 'maestro':
                 return self._generate_maestro(case)
+            elif tool == 'robolectric':
+                return self._generate_robolectric(case)
             else:
                 # 默认回退
                 return self._generate_android(case)
@@ -281,10 +284,10 @@ class MobileAdapter:
                 print(f"[MobileAdapter] {case.id}: 检测到 database/log 断言 → Espresso")
                 return 'espresso'
 
-        # 规则2: unit 层 → Robolectric(未来)
+        # 规则2: unit 层 → Robolectric(无需设备)
         if case.level.value == 'unit':
-            print(f"[MobileAdapter] {case.id}: unit 层 → Robolectric(暂用 Espresso)")
-            return 'espresso'  # TODO: 第三期改成 robolectric
+            print(f"[MobileAdapter] {case.id}: unit 层 → Robolectric")
+            return 'robolectric'
 
         # 规则3: system/acceptance 纯 UI 流程 → Maestro
         if case.level.value in ('system', 'acceptance'):
@@ -301,6 +304,14 @@ class MobileAdapter:
 
         package = self._detect_android_package()
         adapter = MaestroAdapter(self.cwd)
+        return adapter.generate(case, package)
+
+    def _generate_robolectric(self, case: TestCase) -> str:
+        """生成 Robolectric 单元测试"""
+        from .robolectric import RobolectricAdapter
+
+        package = self._detect_android_package()
+        adapter = RobolectricAdapter(self.cwd)
         return adapter.generate(case, package)
 
     def _detect_android_package(self) -> str:
