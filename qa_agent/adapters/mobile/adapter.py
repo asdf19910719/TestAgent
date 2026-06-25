@@ -491,6 +491,15 @@ class {class_name} {{
 }}
 """
 
+        # 写入前先做静态结构自检(拦截 val 重复/import 缺失/括号不配平等编译阻塞)
+        from .kotlin_validator import KotlinStructureValidator
+        validation = KotlinStructureValidator().validate(content)
+        if not validation['ok']:
+            print(f"[MobileAdapter] WARNING: {class_name}.kt 结构校验发现问题:")
+            for err in validation['errors']:
+                print(f"    - {err}")
+            print("    (已写入文件，但需修复后才能编译)")
+
         # 写入文件(Kotlin 路径)
         filename = f"{class_name}.kt"
         filepath = self.cwd / test_dir / package.replace('.', '/') / filename
