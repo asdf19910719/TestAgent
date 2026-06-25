@@ -589,17 +589,37 @@ public class {class_name} {{
         return str(filepath.relative_to(self.cwd))
 
     def _generate_ios(self, case: TestCase) -> str:
-        """iOS XCTest 骨架"""
+        """iOS XCTest 骨架(@AI-FILL 待填,未填充则 fail 而非假过)"""
         class_name = ''.join(w.capitalize() for w in case.id.replace('-', '_').split('_')) + 'Tests'
+        steps_doc = '\n'.join(f'    /// - {s}' for s in case.steps)
+        expected_doc = '\n'.join(f'    /// - {e}' for e in case.expected)
+        target_files = case.targets.get('files', []) if case.targets else []
+        targets_doc = '\n'.join(f'    //   - {f}' for f in target_files) or '    //   (无 targets,从 feature 源码推断)'
         content = f"""import XCTest
 
 /// {case.title}
 /// Feature: {case.feature_id}
 /// Priority: {case.priority.value}
+///
+/// Steps:
+{steps_doc}
+///
+/// Expected:
+{expected_doc}
 class {class_name}: XCTestCase {{
+    // @AI-FILL-SPEC: Designer 读下列源码后填充 @AI-FILL 标记
+    // 待读源码(targets.files):
+{targets_doc}
     func test_{case.id.lower().replace('-', '_')}() {{
-        // TODO: 实现测试
-        XCTAssertTrue(true)
+        // === Arrange ===
+        // @AI-FILL:arrange — 按 Steps/Expected + 源码生成准备代码
+
+        // === Act ===
+        // @AI-FILL:act — 调用被测方法
+
+        // === Assert ===
+        // @AI-FILL:assert — 按 Expected 生成断言
+        XCTFail("@AI-FILL 未填充：本测试尚未实现，不得标 implemented")
     }}
 }}
 """
@@ -610,19 +630,32 @@ class {class_name}: XCTestCase {{
         return str(filepath.relative_to(self.cwd))
 
     def _generate_flutter(self, case: TestCase) -> str:
-        """Flutter test 骨架"""
+        """Flutter test 骨架(@AI-FILL 待填,未填充则 fail 而非假过)"""
         is_integration = case.level.value in ('integration', 'system', 'acceptance')
         test_dir = 'integration_test' if is_integration else 'test'
 
         filename = f"{case.feature_id.lower().replace('-', '_')}_{case.id.lower().replace('-', '_')}_test.dart"
+        steps_doc = '\n'.join(f'  // - {s}' for s in case.steps)
+        expected_doc = '\n'.join(f'  // - {e}' for e in case.expected)
         content = f"""import 'package:flutter_test/flutter_test.dart';
 
+// {case.title}
+// Feature: {case.feature_id}
+// Steps:
+{steps_doc}
+// Expected:
+{expected_doc}
 void main() {{
-  // {case.title}
-  // Feature: {case.feature_id}
   test('{case.id}: {case.title}', () {{
-    // TODO: 实现测试
-    expect(true, true);
+    // === Arrange ===
+    // @AI-FILL:arrange — 按 Steps/Expected + 源码生成准备代码
+
+    // === Act ===
+    // @AI-FILL:act — 调用被测方法
+
+    // === Assert ===
+    // @AI-FILL:assert — 按 Expected 生成断言
+    fail('@AI-FILL 未填充：本测试尚未实现，不得标 implemented');
   }});
 }}
 """
@@ -632,20 +665,35 @@ void main() {{
         return str(filepath.relative_to(self.cwd))
 
     def _generate_react_native(self, case: TestCase) -> str:
-        """React Native jest/detox 骨架"""
+        """React Native jest/detox 骨架(@AI-FILL 待填,未填充则 fail 而非假过)"""
         is_e2e = case.level.value in ('system', 'acceptance')
         test_dir = 'e2e' if is_e2e else '__tests__'
 
         filename = f"{case.id.lower()}.test.ts"
+        steps_doc = '\n'.join(f' * - {s}' for s in case.steps)
+        expected_doc = '\n'.join(f' * - {e}' for e in case.expected)
         content = f"""/**
  * {case.title}
  * Feature: {case.feature_id}
+ *
+ * Steps:
+{steps_doc}
+ *
+ * Expected:
+{expected_doc}
  */
 
 describe('{case.feature_id}', () => {{
   it('should {case.title}', () => {{
-    // TODO: 实现测试
-    expect(true).toBe(true);
+    // === Arrange ===
+    // @AI-FILL:arrange — 按 Steps/Expected + 源码生成准备代码
+
+    // === Act ===
+    // @AI-FILL:act — 调用被测方法
+
+    // === Assert ===
+    // @AI-FILL:assert — 按 Expected 生成断言
+    throw new Error('@AI-FILL 未填充：本测试尚未实现，不得标 implemented');
   }});
 }});
 """
