@@ -66,7 +66,10 @@ class AssertionTranslator:
                 }
 
             imports.update(result['imports'])
-            setup_lines.extend(result['setup'])
+            # setup 去重(resolver 声明只保留一份,避免 Kotlin val 重复声明)
+            for line in result['setup']:
+                if line not in setup_lines:
+                    setup_lines.append(line)
             assertion_lines.extend(result['assertions'])
             helpers.update(result['helpers'])
 
@@ -114,17 +117,19 @@ class AssertionTranslator:
                 table_uri = self._extract_contacts_uri(query)
                 selection, selection_args = self._parse_where_clause(query)
 
-                assertions.append(f'val cursor = resolver.query(')
-                assertions.append(f'    {table_uri},')
-                assertions.append(f'    arrayOf("COUNT(*) AS cnt"),')
-                assertions.append(f'    {selection},')
-                assertions.append(f'    {selection_args},')
-                assertions.append(f'    null')
-                assertions.append(f')')
-                assertions.append(f'cursor.use {{')
-                assertions.append(f'    it.moveToFirst()')
+                assertions.append(f'run {{')
+                assertions.append(f'    val cursor = resolver.query(')
+                assertions.append(f'        {table_uri},')
+                assertions.append(f'        arrayOf("COUNT(*) AS cnt"),')
+                assertions.append(f'        {selection},')
+                assertions.append(f'        {selection_args},')
+                assertions.append(f'        null')
+                assertions.append(f'    )')
+                assertions.append(f'    cursor?.use {{')
+                assertions.append(f'        it.moveToFirst()')
                 if equals is not None:
-                    assertions.append(f'    assertEquals({equals}, it.getInt(it.getColumnIndex("cnt")))')
+                    assertions.append(f'        assertEquals({equals}, it.getInt(it.getColumnIndex("cnt")))')
+                assertions.append(f'    }}')
                 assertions.append(f'}}')
 
             elif 'SELECT' in query.upper():
@@ -134,19 +139,21 @@ class AssertionTranslator:
                 selection, selection_args = self._parse_where_clause(query)
 
                 fields_str = ", ".join([f'"{f}"' for f in fields])
-                assertions.append(f'val cursor = resolver.query(')
-                assertions.append(f'    {table_uri},')
-                assertions.append(f'    arrayOf({fields_str}),')
-                assertions.append(f'    {selection},')
-                assertions.append(f'    {selection_args},')
-                assertions.append(f'    null')
-                assertions.append(f')')
-                assertions.append(f'cursor.use {{')
-                assertions.append(f'    it.moveToFirst()')
+                assertions.append(f'run {{')
+                assertions.append(f'    val cursor = resolver.query(')
+                assertions.append(f'        {table_uri},')
+                assertions.append(f'        arrayOf({fields_str}),')
+                assertions.append(f'        {selection},')
+                assertions.append(f'        {selection_args},')
+                assertions.append(f'        null')
+                assertions.append(f'    )')
+                assertions.append(f'    cursor?.use {{')
+                assertions.append(f'        it.moveToFirst()')
                 if equals is not None:
-                    assertions.append(f'    assertEquals("{equals}", it.getString(0))')
+                    assertions.append(f'        assertEquals("{equals}", it.getString(0))')
                 if contains is not None:
-                    assertions.append(f'    assertTrue(it.getString(0).contains("{contains}"))')
+                    assertions.append(f'        assertTrue(it.getString(0).contains("{contains}"))')
+                assertions.append(f'    }}')
                 assertions.append(f'}}')
 
         return {
