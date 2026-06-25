@@ -79,8 +79,9 @@ def test_generate_unit_test_with_robolectric(mock_android_project):
     assert 'app' in str(result_path) and 'src' in str(result_path) and 'test' in str(result_path), "应生成到 test 目录(非 androidTest)"
     assert 'androidTest' not in str(result_path), "不应生成到 androidTest"
 
-    # 验证 TODO 提示
-    assert 'TODO:' in content or 'TODO ' in content, "应包含实现提示"
+    # 验证 @AI-FILL 范式(未填充即 fail,不假绿)
+    assert '@AI-FILL' in content, "应含 @AI-FILL 填充标记"
+    assert 'fail(' in content, "未填充应有 fail() 守卫(防红线5假绿)"
 
     print(f"\nOK Robolectric 生成测试通过")
     print(f"生成路径: {result_path}")

@@ -64,36 +64,39 @@ class RobolectricGenerator:
 
         imports_str = '\n'.join(sorted(set(imports)))
 
-        # 生成测试方法体
-        precond_todos = []
-        if preconditions:
-            precond_todos.append('        // === Arrange: 准备测试数据 ===')
-            for precond in preconditions:
-                precond_todos.append(f'        // TODO: {precond}')
-            precond_todos.append('')
+        # 生成测试方法体(@AI-FILL 范式,与其他端对齐)
+        precond_todos = ['        // === Arrange: 准备测试数据 ===']
+        precond_todos.append('        // @AI-FILL:arrange — 按下列需求 + 源码生成准备代码')
+        for precond in (preconditions or ['(无显式前置)']):
+            precond_todos.append(f'        // 需求: {precond}')
+        precond_todos.append('')
 
         act_todos = ['        // === Act: 执行操作 ===']
+        act_todos.append('        // @AI-FILL:act — 调用被测方法(读 targets 源码确认签名)')
         for step in steps:
-            act_todos.append(f'        // TODO: {step}')
+            act_todos.append(f'        // 步骤: {step}')
         act_todos.append('')
 
-        # Assert 部分(简化版,unit 层通常是 return_value 断言)
+        # Assert 部分(@AI-FILL,未填充则 fail 而非空过)
         assert_lines = ['        // === Assert: 验证结果 ===']
+        assert_lines.append('        // @AI-FILL:assert — 按 Expected 生成真实断言')
         if assertions:
             for assertion in assertions:
                 atype = assertion.get('type')
                 if atype == 'return_value':
                     method = assertion.get('method', 'unknownMethod')
                     equals = assertion.get('equals')
-                    assert_lines.append(f'        // TODO: 调用 {method}() 并断言返回值 == {equals}')
+                    assert_lines.append(f'        // 期望: {method}() 返回 == {equals}')
                 elif atype == 'state':
                     field = assertion.get('field', 'unknownField')
                     equals = assertion.get('equals')
-                    assert_lines.append(f'        // TODO: 验证状态 {field} == {equals}')
+                    assert_lines.append(f'        // 期望: 状态 {field} == {equals}')
                 else:
-                    assert_lines.append(f'        // TODO: 实现 {atype} 断言')
-        else:
-            assert_lines.append('        // TODO: 添加断言')
+                    assert_lines.append(f'        // 期望: {atype} 断言')
+        for exp in (expected or []):
+            assert_lines.append(f'        // 期望: {exp}')
+        # 未填充守卫:确保空骨架 fail 而非假过(红线5)
+        assert_lines.append('        fail("@AI-FILL 未填充：本测试尚未实现，不得标 implemented")')
 
         # 生成完整代码
         steps_comment = '\n'.join(f' * {s}' for s in steps)
