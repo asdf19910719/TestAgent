@@ -189,9 +189,54 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 - 确实需要物理设备/外部系统才能 mock → 标 `automation.status: manual` 并在 notes 写明**具体**阻塞原因（不是"需要手填"这种甩锅）
 - **禁止**：留 `@AI-FILL`/`TODO` 就标 `implemented`，或丢给用户"需手动补充"
 
+### Android 填充技术手册（实证总结，破解常见障碍）⭐
+
+**背景**：ClawBoxClient 实证——`syncContactsOnBoot()` 是 private suspend、依赖 object 单例做 HTTP、读 Context 绑定的 DB/ContentProvider。这些是 AI 最容易卡住退回 TODO 的地方。但项目通常已具备解决设施（MockK/Robolectric/coroutines-test），关键是你要会用。**遇到下列障碍，按对应打法填，不许放弃**：
+
+| 障碍 | 打法 | 代码模式 |
+|---|---|---|
+| **private 方法** | 反射调用 | `ClassName::class.java.getDeclaredMethod("name").apply{isAccessible=true}.invoke(obj)` |
+| **suspend 方法** | `runTest` 包裹 | `@Test fun t() = runTest { ... }`（需 kotlinx-coroutines-test） |
+| **private + suspend** | 反射 + `kotlin.reflect.full.callSuspend` | `method.isAccessible=true; method.callSuspend(obj)`（runTest 内） |
+| **object 单例做 HTTP** | MockK mockkObject | `mockkObject(BindingApiClient); coEvery { BindingApiClient.listContacts(any(),any()) } returns listOf(...)` |
+| **顶层/companion 函数** | mockkStatic | `mockkStatic("com.x.UtilKt"); every { foo() } returns ...` |
+| **Context 绑定(DB/ContentProvider)** | Robolectric 或 instrumented | unit 层用 `RuntimeEnvironment.getApplication()`；需真 Provider 用 androidTest |
+| **Service 类** | Robolectric `buildService` | `Robolectric.buildService(GatewayService::class.java).create().get()` |
+
+**填充前必做的侦察（决定用哪个打法）**：
+```bash
+# 1. 看项目有什么测试设施(build.gradle 的 testImplementation)
+Grep(pattern="mockk|mockito|robolectric|coroutines-test|truth", path="app/build.gradle.kts")
+# 2. 读一个同类已有测试,抄它的 mock/setup 模式(最可靠)
+Glob(pattern="app/src/*test*/**/*Test.kt") → Read 最相关的一个
+# 3. 尊重项目测试约定(如"Context绑定走集成测试"),别硬塞 unit
+```
+
+**实战示例**（ClawBoxClient TC-CONTACT-001 的 @AI-FILL:act 填充）：
+```kotlin
+// 障碍: syncContactsOnBoot() 是 private suspend + 依赖 BindingApiClient 单例
+// 打法: mockkObject mock HTTP + 反射 callSuspend 调私有方法 + runTest
+@Test
+fun test_tc_contact_001() = runTest {
+    // Arrange: mock 云端返回 3 个联系人(MockK mockkObject)
+    mockkObject(BindingApiClient)
+    coEvery { BindingApiClient.listContacts(any(), any()) } returns listOf(
+        ContactDto(contactId = 1, name = "张三", phone = "13900000001"),
+        ContactDto(contactId = 2, name = "李四", phone = "13900000002"),
+        ContactDto(contactId = 3, name = "王五", phone = "13900000003"),
+    )
+    // Act: 反射调 private suspend
+    val service = Robolectric.buildService(GatewayService::class.java).create().get()
+    val m = GatewayService::class.declaredFunctions.first { it.name == "syncContactsOnBoot" }
+    m.isAccessible = true
+    m.callSuspend(service)
+    // Assert: 已由 Adapter 自动生成(ContentResolver 查询)
+}
+```
+
 **注意**：Adapter 默认生成半成品，你需要：
 1. 读取生成的脚本 + 扫描 `@AI-FILL` 标记
-2. 读 targets 源码 + 侦察测试设施
+2. 读 targets 源码 + 侦察测试设施（按上方技术手册选打法）
 3. **自动填充真实测试逻辑**（Edit 工具，不留 TODO）
 4. 确保每个测试至少一个有效断言（不是 `assert True`）
 5. 自检无 `@AI-FILL`/`TODO` 残留后，才可标 `implemented`
