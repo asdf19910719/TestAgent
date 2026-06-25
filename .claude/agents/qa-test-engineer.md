@@ -205,17 +205,40 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 
 **填充前必做的侦察（决定用哪个打法）**：
 ```bash
-# 1. 看项目有什么测试设施(build.gradle 的 testImplementation)
-Grep(pattern="mockk|mockito|robolectric|coroutines-test|truth", path="app/build.gradle.kts")
+# 1. 看项目有什么测试设施 + 它在哪个 source set(决定能否在该测试类型里用)
+#    ⚠️ 关键: testImplementation 只在 unit 测试(src/test)可用,
+#            androidTestImplementation 才在 instrumented(src/androidTest)可用
+Grep(pattern="(test|androidTest)Implementation.*(mockk|mockito|robolectric|coroutines-test|truth)", path="app/build.gradle.kts", -n=true)
 # 2. 读一个同类已有测试,抄它的 mock/setup 模式(最可靠)
 Glob(pattern="app/src/*test*/**/*Test.kt") → Read 最相关的一个
 # 3. 尊重项目测试约定(如"Context绑定走集成测试"),别硬塞 unit
 ```
 
+**source set 冲突的判定与破解（实证：ClawBoxClient TC-CONTACT-001）**：
+
+实战发现一类真实障碍——用例**同时**需要"真 ContentProvider"(→instrumented/androidTest)和"mock HTTP 单例"(→需要 MockK),
+但 `MockK 只在 testImplementation`,instrumented 源集用不了 → 直接走 androidTest 编译不过。
+
+判定矩阵（按用例需要的能力 × 框架可用源集 选打法）：
+
+| 用例需要 | mock 框架在哪 | 打法 |
+|---|---|---|
+| 仅纯逻辑/Context（无真 Provider） | testImpl 有 mockk+robolectric | **Robolectric unit 测试**（src/test），mock 随便用 |
+| 真 ContentProvider + 要 mock 单例 | mockk 只在 testImpl | **优先 Robolectric**（用 `@Config(shadows)` 或 Robolectric 自带 ContentProvider shadow，仍在 src/test 能 mock）；Robolectric 的 Provider shadow 够用时不要去 androidTest |
+| 真 ContentProvider + 要 mock 单例 | mockk 也在 androidTestImpl | instrumented + mockkObject |
+| 真 ContentProvider + **无需** mock | 任意 | instrumented Espresso（Adapter 默认路由） |
+| 框架确实缺（如 androidTest 无 mock，又必须真 Provider+mock） | — | 在 notes 写明"需补 androidTestImplementation(mockk-android)"，标 `manual` 或建议加依赖；**不要**生成编译不过的代码 |
+
+**关键原则**：填充前先确认"我要用的 mock/工具在这个测试类型的源集里可用"。
+不可用时优先换测试类型（多数 ContactsContract 场景 Robolectric 的 ContentProvider shadow 就够），
+而不是生成引用不存在依赖的代码。
+
 **实战示例**（ClawBoxClient TC-CONTACT-001 的 @AI-FILL:act 填充）：
 ```kotlin
 // 障碍: syncContactsOnBoot() 是 private suspend + 依赖 BindingApiClient 单例
-// 打法: mockkObject mock HTTP + 反射 callSuspend 调私有方法 + runTest
+// source set 检查: MockK 仅在 testImplementation → 改走 Robolectric unit(src/test),
+//                  Robolectric 提供 ContentProvider shadow,断言仍可查 ContactsContract
+// 打法: Robolectric + mockkObject mock HTTP + 反射 callSuspend 调私有方法 + runTest
 @Test
 fun test_tc_contact_001() = runTest {
     // Arrange: mock 云端返回 3 个联系人(MockK mockkObject)
