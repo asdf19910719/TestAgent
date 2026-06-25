@@ -302,12 +302,100 @@ class MobileAdapter:
         return 'com.example.app'
 
     def _generate_android(self, case: TestCase) -> str:
-        """Android JUnit/Espresso 骨架"""
+        """Android instrumented 测试生成(带真实断言)"""
+        from .assertion_translator import AssertionTranslator
+
+        # 判断测试目录:instrumented(需设备) vs unit(Robolectric)
+        is_instrumented = case.level.value in ('integration', 'system', 'acceptance')
+        test_dir = 'app/src/androidTest/kotlin' if is_instrumented else 'app/src/test/kotlin'
+
+        class_name = ''.join(w.capitalize() for w in case.id.replace('-', '_').split('_'))
+        package = self._detect_android_package()
+
+        # 转译断言
+        translator = AssertionTranslator(package, language='kotlin')
+        translated = translator.translate(case.assertions) if case.assertions else {
+            'imports': [], 'setup_code': '', 'assertion_code': '// TODO: 添加断言', 'helpers': {}
+        }
+
+        # 生成 imports
+        imports = [
+            'import androidx.test.ext.junit.runners.AndroidJUnit4',
+            'import org.junit.Test',
+            'import org.junit.runner.RunWith',
+        ]
+        imports.extend(translated['imports'])
+
+        # 生成测试方法体
+        steps_comment = '\n'.join(f'     * - {s}' for s in case.steps)
+        expected_comment = '\n'.join(f'     * - {e}' for e in case.expected)
+
+        # 生成 preconditions 提示(需要用户手动填充)
+        precond_todos = []
+        if case.preconditions:
+            precond_todos.append('        // === Arrange: 准备测试数据(需手动补充) ===')
+            for precond in case.preconditions:
+                precond_todos.append(f'        // TODO[必填]: {precond}')
+            precond_todos.append('')
+
+        # Act 部分(从 steps 生成提示)
+        act_todos = ['        // === Act: 执行操作 ===']
+        for step in case.steps:
+            act_todos.append(f'        // TODO: {step}')
+        act_todos.append('')
+
+        # Assert 部分(真实生成的断言代码)
+        assert_code = translated['assertion_code']
+        if translated['setup_code']:
+            assert_code = f"{translated['setup_code']}\n\n        {assert_code}"
+
+        # 辅助方法
+        helper_methods = '\n'.join(translated['helpers'].values())
+
+        content = f"""package {package}
+
+{chr(10).join(imports)}
+
+/**
+ * {case.title}
+ *
+ * Feature: {case.feature_id}
+ * Priority: {case.priority.value}
+ *
+ * Steps:
+{steps_comment}
+ *
+ * Expected:
+{expected_comment}
+ */
+@RunWith(AndroidJUnit4::class)
+class {class_name} {{
+    @Test
+    fun test_{case.id.lower().replace('-', '_')}() {{
+{chr(10).join(precond_todos)}
+{chr(10).join(act_todos)}
+        // === Assert: 验证结果(自动生成) ===
+        {assert_code}
+    }}
+{helper_methods}
+}}
+"""
+
+        # 写入文件(Kotlin 路径)
+        filename = f"{class_name}.kt"
+        filepath = self.cwd / test_dir / package.replace('.', '/') / filename
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(content, encoding='utf-8')
+
+        return str(filepath.relative_to(self.cwd))
+
+    def _generate_android_old_java_skeleton(self, case: TestCase) -> str:
+        """旧版 Java 空骨架生成器(已废弃,保留作参考)"""
         is_ui = case.level.value in ('system', 'acceptance')
         test_dir = 'app/src/androidTest/java' if is_ui else 'app/src/test/java'
 
         class_name = ''.join(w.capitalize() for w in case.id.replace('-', '_').split('_'))
-        package = self._detect_android_package()  # 自动检测真实包名
+        package = self._detect_android_package()
 
         if is_ui:
             content = f"""package {package};
