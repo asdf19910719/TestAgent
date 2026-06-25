@@ -406,13 +406,17 @@ class MobileAdapter:
             'imports': [], 'setup_code': '', 'assertion_code': '// TODO: 添加断言', 'helpers': {}
         }
 
-        # 生成 imports
+        # 生成 imports（转译器返回裸类名，需补 import 前缀）
         imports = [
             'import androidx.test.ext.junit.runners.AndroidJUnit4',
             'import org.junit.Test',
             'import org.junit.runner.RunWith',
         ]
-        imports.extend(translated['imports'])
+        for imp in translated['imports']:
+            # 转译器返回的是裸类名（如 'android.content.ContentResolver'），补 import 前缀
+            line = imp if imp.strip().startswith('import ') else f'import {imp}'
+            if line not in imports:
+                imports.append(line)
 
         # 生成测试方法体
         steps_comment = '\n'.join(f'     * - {s}' for s in case.steps)
@@ -441,10 +445,18 @@ class MobileAdapter:
             act_todos.append(f'        // 步骤: {step}')
         act_todos.append('')
 
-        # Assert 部分(真实生成的断言代码)
-        assert_code = translated['assertion_code']
+        # Assert 部分(真实生成的断言代码)——统一缩进到方法体内(8 空格)
+        def _indent_block(code: str, spaces: int = 8) -> str:
+            """把多行代码块每一行缩进对齐(空行不加缩进)"""
+            pad = ' ' * spaces
+            lines = code.split('\n')
+            return '\n'.join((pad + ln) if ln.strip() else ln for ln in lines)
+
+        raw_assert = translated['assertion_code']
         if translated['setup_code']:
-            assert_code = f"{translated['setup_code']}\n\n        {assert_code}"
+            raw_assert = f"{translated['setup_code']}\n\n{raw_assert}"
+        # 整体重新缩进,避免多行 query(...) 的续行跑到方法体外
+        assert_code = _indent_block(raw_assert.strip(), 8).lstrip()
 
         # 辅助方法
         helper_methods = '\n'.join(translated['helpers'].values())
