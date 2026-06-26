@@ -276,22 +276,63 @@ class ImpactAnalyzer:
         1. current_selection 为空（正常 targets 匹配没选出任何用例）
         2. scope 非空
 
-        匹配规则：feature_id == scope 或 scope 是 feature_id 的子串（宽松，
-        容忍 "订单" 匹配 "order-management" 之外的命名差异由调用方保证）。
+        匹配规则（修复三个 bug，按优先级）：
+        1. 精确匹配：feature_id == scope（大小写不敏感）
+        2. 前缀匹配：feature_id 以 "scope-" 开头（如 "contact" 匹 "F-CONTACT-*"）
+        3. 分词匹配：scope 的所有词（按 - 分割）都在 feature_id 中
+
+        防御：
+        - 空 feature_id 不匹配任何 scope（修复 Bug 2：空串是任意串子串）
+        - 拒绝纯自然语言子串匹配（修复 Bug 1："联系人通讯录" 不匹配 "F-CONTACT-SYNC"）
+
+        多 feature 支持（修复 Bug 3）：
+        - scope 可用逗号分隔多个（"F-CONTACT-SYNC,F-CONTACT-IDENTITY"）
+        - 或用共同前缀（"contact" 匹配所有 F-CONTACT-*）
+
         仍受 priority_filter 和 state 约束，不会越权选 P3 或 retired 用例。
         """
         if current_selection or not scope:
             return current_selection
 
-        scope_lower = scope.lower()
-        scope_cases = [
-            c for c in all_cases
-            if c.state.value in ('active', 'review')
-            and c.priority.value in priority_filter
-            and (c.feature_id == scope
-                 or scope_lower in c.feature_id.lower()
-                 or c.feature_id.lower() in scope_lower)
-        ]
+        # 支持逗号分隔多个 scope（"feature1,feature2"）
+        scope_parts = [s.strip() for s in scope.split(',')]
+
+        scope_cases = []
+        for c in all_cases:
+            if c.state.value not in ('active', 'review'):
+                continue
+            if c.priority.value not in priority_filter:
+                continue
+
+            # Bug 2 修复：跳过空 feature_id（空串是任意串子串，会误匹配）
+            if not c.feature_id or not c.feature_id.strip():
+                continue
+
+            feature_lower = c.feature_id.lower()
+
+            # 对每个 scope 部分尝试匹配
+            for sp in scope_parts:
+                sp_lower = sp.lower()
+
+                # 1. 精确匹配
+                if feature_lower == sp_lower:
+                    scope_cases.append(c)
+                    break
+
+                # 2. 前缀匹配：scope 是 feature_id 去掉前缀后的前缀
+                #    "contact" 匹配 "F-CONTACT-SYNC" / "F-CONTACT-IDENTITY"
+                feature_no_prefix = feature_lower.lstrip('f-').lstrip('fr-').lstrip('nfr-')
+                if feature_no_prefix.startswith(sp_lower + '-'):
+                    scope_cases.append(c)
+                    break
+
+                # 3. 分词匹配：scope 的所有词（按-/_分割）都在 feature_id 中
+                #    "contact sync" 匹配 "F-CONTACT-SYNC"
+                sp_tokens = [t for t in sp_lower.replace('_', '-').split('-') if t]
+                feature_tokens = set(feature_lower.replace('_', '-').split('-'))
+                if sp_tokens and all(tok in feature_tokens for tok in sp_tokens):
+                    scope_cases.append(c)
+                    break
 
         if scope_cases:
             print(
