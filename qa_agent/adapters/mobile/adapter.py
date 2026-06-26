@@ -519,6 +519,13 @@ class {class_name} {{
         # 写入文件(Kotlin 路径)
         filename = f"{class_name}.kt"
         filepath = self.cwd / test_dir / package.replace('.', '/') / filename
+
+        # 产物路径约束校验(防止写到约定结构外)
+        from ...core.paths import validate_output_path
+        pv = validate_output_path(str(filepath), self.cwd)
+        if not pv['ok']:
+            print(f"[MobileAdapter] WARNING: 产物路径越界 — {pv['reason']}")
+
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_text(content, encoding='utf-8')
 
