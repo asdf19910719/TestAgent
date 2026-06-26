@@ -26,7 +26,9 @@
   或对 Java 项目直接 shell 调用其 JAR）。
 - **承载点**：`qa_agent/adapters/backend/adapter.py`
 
-### A2. 接口定义生成 + 调用链/SQL 追踪 ★P0 高价值
+### A2. 接口定义生成 + 调用链/SQL 追踪 ★P0 高价值 ✅ 已完成
+- **实现**：qa-test-engineer.md 后端章节新增"接口定义增强"步骤（纯 prompt，
+  用 CodeGraph callees 追调用链 + 读 Mapper XML/注解提 SQL + 参数映射 + testPoints）。
 - **oec 怎么做**：`api-definition-generator` + `api-source-analyzer` 追踪 Controller→Service→Dao 调用链，
   提取 SQL + 分析"WHERE 字段哪些需接口参数提供"，生成含 testPoints/businessRules/databaseQueries/
   serverGeneratedFields 的 `api_definition.jsonl` + `db_schema.md`。
@@ -34,7 +36,9 @@
 - **迁移方式**：借鉴提示词为主 + 复用标准 JSON 格式规范，叠加在现有 codegraph 上。
 - **依赖**：A1 产物更佳
 
-### A3. 场景设计 6 维度 + scenario.md 产物 ★P1 高价值
+### A3. 场景设计 6 维度 + scenario.md 产物 ★P1 高价值 ✅ 已完成
+- **实现**：qa-test-engineer.md 后端章节新增"场景设计 6 维度 + scenario.md"步骤
+  （6 维度表 + 测试点清单 + 覆盖自检 + 未覆盖列表，产出 qa/run/scenario.md）。
 - **oec 怎么做**：`api-scenario-designer` 按"核心流程/CRUD闭环/业务规则跨接口/数据一致性/
   跨模块联动/关键业务异常"6 维度提取测试点清单，设计场景 + 回填覆盖统计，输出标准 scenario.md。
 - **TestAgent 现状**：部分。`qa-test-engineer.md` 有后端维度矩阵但是散文式提示词，
