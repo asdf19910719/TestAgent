@@ -561,6 +561,68 @@ def report(fmt, output_path):
         click.echo(content)
 
 
+@cli.command(name='coverage')
+@click.option('--jacoco-xml', 'xml_path', required=True,
+              help='JaCoCo XML 报告路径')
+@click.option('--source-root', 'source_roots', multiple=True,
+              help='源码根目录（可多次，用于读源码做 Gap 分类，如 app/src/main/kotlin）')
+@click.option('--format', 'fmt', type=click.Choice(['json', 'markdown']),
+              default='markdown', help='输出格式（默认 markdown）')
+@click.option('--gap-report', is_flag=True,
+              help='输出未覆盖缺口清单（按类型分组）')
+def coverage(xml_path, source_roots, fmt, gap_report):
+    """
+    [Subagent 用] 解析 JaCoCo 覆盖率 + Gap 缺口分析（语言无关）
+
+    从 JaCoCo XML 提取行/分支覆盖率，识别未覆盖代码并分类
+    （异常/边界/主流程/防御性），供补充用例参考。
+
+    示例：
+      qa coverage --jacoco-xml app/build/reports/jacoco/test/jacocoTestReport.xml
+      qa coverage --jacoco-xml cov.xml --source-root app/src/main/kotlin --gap-report
+    """
+    from ..core.coverage_analyzer import analyze_coverage
+
+    try:
+        result = analyze_coverage(xml_path, source_roots=list(source_roots))
+    except FileNotFoundError:
+        click.echo(f"❌ JaCoCo XML 不存在: {xml_path}", err=True)
+        sys.exit(1)
+    except ValueError as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(2)
+
+    if fmt == 'json':
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    # markdown 输出
+    click.echo(f"# 覆盖率分析\n")
+    click.echo(f"- 行覆盖率: **{result['line_rate']}%** ({result['line_covered']}/{result['line_covered'] + result['line_missed']})")
+    click.echo(f"- 分支覆盖率: **{result['branch_rate']}%**")
+    click.echo(f"- 类数: {result['class_count']}")
+    click.echo(f"- 未覆盖缺口: {len(result['gaps'])} 处\n")
+
+    summary = result['gap_summary']
+    click.echo("## 缺口类型分布\n")
+    click.echo(f"- 🔴 主流程未覆盖: {summary.get('main_path', 0)}")
+    click.echo(f"- 🟠 边界校验未覆盖: {summary.get('boundary', 0)}")
+    click.echo(f"- 🟡 异常路径未覆盖: {summary.get('exception', 0)}")
+    click.echo(f"- ⚪ 防御性代码未覆盖: {summary.get('defensive', 0)}")
+
+    if gap_report and result['gaps']:
+        click.echo("\n## 缺口清单\n")
+        # 主流程优先（最该补）
+        order = ['main_path', 'boundary', 'exception', 'defensive']
+        gaps_by_kind = {}
+        for g in result['gaps']:
+            gaps_by_kind.setdefault(g['kind'], []).append(g)
+        for kind in order:
+            for g in gaps_by_kind.get(kind, []):
+                code = f" — `{g['code']}`" if g['code'] else ''
+                click.echo(f"- [{kind}] {g['class_name']}:{g['line_num']}{code}")
+
+
 @cli.command(name='scaffold')
 @click.option('--case', 'case_id', required=True, help='用例 ID')
 def scaffold(case_id):
