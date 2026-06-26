@@ -4,6 +4,9 @@
 > 已完成的（需求解析/路径约束/报告增强/覆盖率分析）不在此列。
 > 每项标注价值、迁移方式、依赖，便于以后按优先级捡起。
 
+> **进度更新**：W1 前端静态分析（commit 含 `qa_agent/webui/analyzer/`）、
+> A1 接口扫描（`qa_agent/core/api_scanner.py`）**已完成**，下方对应小节标 ✅。
+
 ---
 
 ## 一、API 测试输入流水线（最高杠杆，三件套）
@@ -12,7 +15,9 @@
 > 但**没有任何工具生成这个文件**——接口发现/定义/场景设计这条"输入流水线"是空白，
 > 全压在 subagent 临场推理。补齐后 API 测试从"猜接口"升级为"基于真实接口清单+调用链+SQL"。
 
-### A1. 接口自动发现（Spring MVC 扫描）★P0 高价值
+### A1. 接口自动发现（Spring MVC 扫描）★P0 高价值 ✅ 已完成
+- **实现**：`qa_agent/core/api_scanner.py`（源码模式正则解析）+ `scan-api` CLI +
+  接入 qa-test-engineer.md 后端章节。输出对齐 `{'apis':[...]}` 消费端结构。
 - **oec 怎么做**：`api-scanner` 从 JAR/class/源码三种输入提取 `@RestController`/`@GetMapping` 注解，
   输出接口路径/方法/参数/请求体/响应体的标准 JSON，自动从 application.yml/pom.xml 提取服务名。
   源：`oec-infra/skills/test/skills/api-scanner/`（带 jar）
@@ -57,7 +62,9 @@
 
 ## 二、WebUI 测试能力
 
-### W1. 前端静态源码分析（Vue 路由→组件→字段/按钮/API 知识图）★P0 高价值
+### W1. 前端静态源码分析（Vue 路由→组件→字段/按钮/API 知识图）★P0 高价值 ✅ 已完成
+- **实现**：迁移整个包到 `qa_agent/webui/analyzer/`（analyze + parsers/ + extractors/）+
+  接入 qa-test-engineer.md Web 前端章节。`python -m qa_agent.webui.analyzer.analyze` 可直接调。
 - **oec 怎么做**：`web-uitest-frontend-analyzer`（带 `scripts/analyze.py`）读 Vue 源码，
   按 test-url 前缀预筛路由，输出 `frontend_knowledge.json`：路由→组件、form_fields[].label/type、
   按钮、调用的 API、状态机条件、element_index。支持 monorepo/微前端。目的"避免 LLM 猜业务行为"。
