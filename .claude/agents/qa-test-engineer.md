@@ -190,77 +190,15 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 - 确实需要物理设备/外部系统才能 mock → 标 `automation.status: manual` 并在 notes 写明**具体**阻塞原因（不是"需要手填"这种甩锅）
 - **禁止**：留 `@AI-FILL`/`TODO` 就标 `implemented`，或丢给用户"需手动补充"
 
-### Android 填充技术手册（实证总结，破解常见障碍）⭐
+### Android 填充技术手册 → 见 mobile 分册
 
-**背景**：ClawBoxClient 实证——`syncContactsOnBoot()` 是 private suspend、依赖 object 单例做 HTTP、读 Context 绑定的 DB/ContentProvider。这些是 AI 最容易卡住退回 TODO 的地方。但项目通常已具备解决设施（MockK/Robolectric/coroutines-test），关键是你要会用。**遇到下列障碍，按对应打法填，不许放弃**：
-
-| 障碍 | 打法 | 代码模式 |
-|---|---|---|
-| **private 方法** | 反射调用 | `ClassName::class.java.getDeclaredMethod("name").apply{isAccessible=true}.invoke(obj)` |
-| **suspend 方法** | `runTest` 包裹 | `@Test fun t() = runTest { ... }`（需 kotlinx-coroutines-test） |
-| **private + suspend** | 反射 + `kotlin.reflect.full.callSuspend` | `method.isAccessible=true; method.callSuspend(obj)`（runTest 内） |
-| **object 单例做 HTTP** | MockK mockkObject | `mockkObject(BindingApiClient); coEvery { BindingApiClient.listContacts(any(),any()) } returns listOf(...)` |
-| **顶层/companion 函数** | mockkStatic | `mockkStatic("com.x.UtilKt"); every { foo() } returns ...` |
-| **Context 绑定(DB/ContentProvider)** | Robolectric 或 instrumented | unit 层用 `RuntimeEnvironment.getApplication()`；需真 Provider 用 androidTest |
-| **Service 类** | Robolectric `buildService` | `Robolectric.buildService(GatewayService::class.java).create().get()` |
-
-**填充前必做的侦察（决定用哪个打法）**：
-```bash
-# 1. 看项目有什么测试设施 + 它在哪个 source set(决定能否在该测试类型里用)
-#    ⚠️ 关键: testImplementation 只在 unit 测试(src/test)可用,
-#            androidTestImplementation 才在 instrumented(src/androidTest)可用
-Grep(pattern="(test|androidTest)Implementation.*(mockk|mockito|robolectric|coroutines-test|truth)", path="app/build.gradle.kts", -n=true)
-# 2. 读一个同类已有测试,抄它的 mock/setup 模式(最可靠)
-Glob(pattern="app/src/*test*/**/*Test.kt") → Read 最相关的一个
-# 3. 尊重项目测试约定(如"Context绑定走集成测试"),别硬塞 unit
-```
-
-**source set 冲突的判定与破解（实证：ClawBoxClient TC-CONTACT-001）**：
-
-实战发现一类真实障碍——用例**同时**需要"真 ContentProvider"(→instrumented/androidTest)和"mock HTTP 单例"(→需要 MockK),
-但 `MockK 只在 testImplementation`,instrumented 源集用不了 → 直接走 androidTest 编译不过。
-
-判定矩阵（按用例需要的能力 × 框架可用源集 选打法）：
-
-| 用例需要 | mock 框架在哪 | 打法 |
-|---|---|---|
-| 仅纯逻辑/Context（无真 Provider） | testImpl 有 mockk+robolectric | **Robolectric unit 测试**（src/test），mock 随便用 |
-| 真 ContentProvider + 要 mock 单例 | mockk 只在 testImpl | **优先 Robolectric**（用 `@Config(shadows)` 或 Robolectric 自带 ContentProvider shadow，仍在 src/test 能 mock）；Robolectric 的 Provider shadow 够用时不要去 androidTest |
-| 真 ContentProvider + 要 mock 单例 | mockk 也在 androidTestImpl | instrumented + mockkObject |
-| 真 ContentProvider + **无需** mock | 任意 | instrumented Espresso（Adapter 默认路由） |
-| 框架确实缺（如 androidTest 无 mock，又必须真 Provider+mock） | — | 在 notes 写明"需补 androidTestImplementation(mockk-android)"，标 `manual` 或建议加依赖；**不要**生成编译不过的代码 |
-
-**关键原则**：填充前先确认"我要用的 mock/工具在这个测试类型的源集里可用"。
-不可用时优先换测试类型（多数 ContactsContract 场景 Robolectric 的 ContentProvider shadow 就够），
-而不是生成引用不存在依赖的代码。
-
-**实战示例**（ClawBoxClient TC-CONTACT-001 的 @AI-FILL:act 填充）：
-```kotlin
-// 障碍: syncContactsOnBoot() 是 private suspend + 依赖 BindingApiClient 单例
-// source set 检查: MockK 仅在 testImplementation → 改走 Robolectric unit(src/test),
-//                  Robolectric 提供 ContentProvider shadow,断言仍可查 ContactsContract
-// 打法: Robolectric + mockkObject mock HTTP + 反射 callSuspend 调私有方法 + runTest
-@Test
-fun test_tc_contact_001() = runTest {
-    // Arrange: mock 云端返回 3 个联系人(MockK mockkObject)
-    mockkObject(BindingApiClient)
-    coEvery { BindingApiClient.listContacts(any(), any()) } returns listOf(
-        ContactDto(contactId = 1, name = "张三", phone = "13900000001"),
-        ContactDto(contactId = 2, name = "李四", phone = "13900000002"),
-        ContactDto(contactId = 3, name = "王五", phone = "13900000003"),
-    )
-    // Act: 反射调 private suspend
-    val service = Robolectric.buildService(GatewayService::class.java).create().get()
-    val m = GatewayService::class.declaredFunctions.first { it.name == "syncContactsOnBoot" }
-    m.isAccessible = true
-    m.callSuspend(service)
-    // Assert: 已由 Adapter 自动生成(ContentResolver 查询)
-}
-```
+移动端 @AI-FILL 填充遇到障碍（private/suspend 方法、object 单例、Context 绑定、
+source set 冲突等）时的破解打法 + ClawBoxClient 实战示例，已移至
+`.claude/agents/guidance/mobile.md`（测移动端项目时按需 Read）。
 
 **注意**：Adapter 默认生成半成品，你需要：
 1. 读取生成的脚本 + 扫描 `@AI-FILL` 标记
-2. 读 targets 源码 + 侦察测试设施（按上方技术手册选打法）
+2. 读 targets 源码 + 侦察测试设施（移动端按 mobile 分册的技术手册选打法）
 3. **自动填充真实测试逻辑**（Edit 工具，不留 TODO）
 4. 确保每个测试至少一个有效断言（不是 `assert True`）
 5. 自检无 `@AI-FILL`/`TODO` 残留后，才可标 `implemented`
@@ -371,141 +309,21 @@ Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matc
 
 **每条主流程 = 1 个 E2E 测试用例**。这是最低覆盖标准。
 
-### 按端类型的用例维度矩阵
+### 按端类型的用例维度矩阵（按需加载，避免单文件过长稀释注意力）
 
-#### Web 前端项目
+> **重要**：各端的详细维度矩阵 + 专属能力已拆分到 `guidance/` 分册。
+> 先判断项目类型，**只 Read 对应分册**，不要把所有端的内容都加载（无关内容会干扰当前任务）：
 
-| 维度 | 必测场景 | 用例类型 |
+| 项目类型 | Read 这个分册 | 含内容 |
 |---|---|---|
-| **页面导航** | 每个路由可达、前进后退、直接访问URL、404处理 | E2E |
-| **表单提交** | 正常提交、空值校验、格式校验、重复提交防护 | 功能+边界 |
-| **数据展示** | 列表加载、空状态、加载中、错误状态、分页 | 功能+异常 |
-| **登录态** | 未登录重定向、token过期刷新、退出清理 | 状态转换 |
-| **响应式** | 关键页面在移动端/平板/桌面可用 | 兼容性 |
-| **网络异常** | 请求失败提示、超时重试、离线提示 | 容错 |
+| 后端 / API（Spring 等） | `.claude/agents/guidance/backend-api.md` | API 维度矩阵 + 接口扫描(A1) + 调用链/SQL(A2) + 场景设计6维度(A3) + pytest规范(A5) + 双轨覆盖(A4) |
+| Web 前端（Vue 等） | `.claude/agents/guidance/web-frontend.md` | Web 维度矩阵 + Vue 前端静态分析(W1) + 选择器质量 |
+| 移动端（Android/iOS/Flutter/RN） | `.claude/agents/guidance/mobile.md` | 移动维度矩阵 + 三轨工具选择 + Android 填充技术手册 + source set 冲突判定 |
 
-**Vue 项目：先做前端静态分析（推荐，补运行时探测短板）** ⭐
+分册查找顺序与主文件一致：优先 `~/.claude/agents/guidance/`（全局），
+回退 `.claude/agents/guidance/`（项目级）。找不到分册时按通用维度（正常+异常+边界+状态转换）设计。
 
-设计 Vue 前端用例前，先用静态分析提取路由→组件→字段/按钮/API 知识图，
-**不依赖登录成功**（运行时 Playwright 探测必须先登录才能拿元素，复杂前置时拿不到）：
-```bash
-python -m qa_agent.webui.analyzer.analyze \
-  --frontend-repo <前端项目根> --test-urls /目标路由 \
-  --output qa/run/frontend_knowledge.json
-```
-产出 `frontend_knowledge.json` 含：路由表、组件 form_fields（含中文 label/type）、
-按钮、调用的 API、element_index。用它做两件事：
-1. **设计用例**：知道页面有哪些字段/按钮/业务规则，断言带语义（"用户名"而非裸 selector）
-2. **喂给 e2e_enhancer**：静态知识 + 运行时 DOM 元素互补，生成更准的 Playwright 脚本
-
-仅 Vue2/Vue3 项目支持；非 Vue 或拿不到源码时跳过，回退到运行时探测。
-
-#### 后端 API 项目
-
-| 维度 | 必测场景 | 用例类型 |
-|---|---|---|
-| **接口契约** | 每个 API 的 200/4xx/5xx 响应、字段类型正确 | 功能+异常 |
-| **鉴权** | 无 token 拒绝、过期 token、越权访问他人数据 | 安全 |
-| **数据操作** | CRUD 完整性、级联删除、唯一约束、外键完整 | 功能+边界 |
-| **幂等性** | 重复请求不产生副作用（POST除外） | 容错 |
-| **分页/过滤** | 首页、末页、超范围、排序、组合过滤 | 边界 |
-| **并发写入** | 同一资源并发更新、乐观锁冲突处理 | 竞态 |
-
-**Spring MVC 项目：先扫接口清单（推荐，避免"猜接口"）** ⭐
-
-设计 API 用例前，先用静态扫描提取真实接口清单（源码模式，无需编译）：
-```bash
-python -m qa_agent.cli.main scan-api \
-  --source-root src/main/java \
-  --output qa/run/api_definition.json
-```
-产出 `api_definition.json`（`{'apis': [{method, path, class, handler}]}`），用它：
-1. **设计用例**：对照真实接口清单逐个覆盖，不靠读源码"猜"有哪些接口
-2. **算应测接口数**：执行器 enhanced_execute_with_auth 直接读它算接口覆盖率
-   （之前这个文件没人生成，覆盖率算不准）
-
-非 Spring 项目跳过；源码模式不解析外部依赖类型的请求体/响应体字段。
-
-**接口定义增强：调用链 + SQL + testPoints（A2，深化用例断言质量）** ⭐
-
-`scan-api` 给出接口骨架（method/path/handler）后，对**核心接口**（增删改、
-涉及数据一致性的）用 CodeGraph 追调用链，提取 SQL 和测试点，让断言有据可依：
-
-1. **追调用链**（Controller → Service → Dao/Mapper）：
-   ```bash
-   codegraph callees <ControllerClass>.<handler>   # 该接口调了谁
-   codegraph callees <ServiceClass>.<method>        # 逐层下钻到 Dao
-   ```
-2. **提取 SQL**：读 Dao 方法对应的 Mapper XML（`<select>/<insert>/<update>/
-   <delete>`）或注解（`@Select/@Insert` 等），拿到真实 SQL。
-3. **分析参数映射**：SQL 的 WHERE 字段哪些需接口参数提供（注意变量重命名，
-   如 `userId` 传入后赋给 `uid`，要追踪映射）。
-4. **提炼 testPoints**：基于 SQL + 业务逻辑提炼"该接口必须验证什么"，写进用例
-   `assertions`。例如有 `WHERE status=? AND owner_id=?` → 必测"越权访问他人数据被拒"。
-
-把每个核心接口的 `{调用链, sql, 参数映射, testPoints}` 记到用例 notes 或
-`qa/run/api_definition.json` 对应条目，作为断言依据——这是把"猜断言"升级为
-"基于真实 SQL/调用链设计断言"的关键。非核心接口（纯查询/无副作用）可只做骨架。
-
-**场景设计 6 维度 + scenario.md 产物（A3，防漏场景）** ⭐
-
-单接口的参数校验/边界值在上面"后端 API 维度矩阵"里覆盖；而**跨接口的业务场景**
-易漏，需用 6 个**场景视角**维度系统化提取，并产出可自检的 `qa/run/scenario.md`：
-
-| 维度 | 含义 | 例 |
-|---|---|---|
-| 核心业务流程 | 用户完成核心任务的端到端链路 | 下单→支付→发货→确认 |
-| CRUD 闭环 | 创建→查询→修改→删除→查不到 | 变量 CRUD 完整闭环 |
-| 业务规则跨接口 | 规则在多接口间一致 | 同环境变量名唯一性 |
-| 数据一致性与流转 | 改后查、多查询方式结果一致 | 修改 value 后查询返回新值 |
-| 跨模块联动 | 一个操作触发其他模块 | 删环境→级联处理其下变量 |
-| 关键业务异常路径 | 重要的异常分支 | 删除已删除的资源报错 |
-
-**流程**：
-1. **提测试点清单**：从需求按 6 维度提取，建表
-   `| ID | 类别 | 优先级 | 业务能力 | 验证点 | 覆盖场景 |`（覆盖场景列先留空）
-2. **设计场景**：每个场景声明"覆盖测试点: REQ-XXX"，每步标"对应验证点: REQ-XXX.vN"
-3. **覆盖自检**：回填测试点清单的"覆盖场景"列，输出覆盖统计 + **未覆盖列表**
-   （P0/P1 测试点必须全覆盖，未覆盖的列出补救建议）
-4. 写入 `qa/run/scenario.md`（头部=测试点清单+统计，下面=场景设计），
-   场景再落地为 `qa/cases/<feature>/*.yml`。
-
-这把 Gatekeeper"防漏场景/主流程清单显式确认"的要求固化成**可检产物**——
-未覆盖的 P0/P1 测试点一目了然，比散文式设计更难漏。
-
-**pytest 脚本生成规范 + DB 校验（A5，降生成 bug 率）** ⭐
-
-生成 API pytest 脚本时遵守以下规范（借鉴 oec，避高频坑）：
-- **一接口一文件 / 一场景一文件**：`test_api_<method>_<path_slug>.py` / `test_scenario_<name>.py`，
-  不要把多接口塞一个文件（失败定位困难）
-- **fixture scope**：场景测试的前置数据用 `@pytest.fixture(scope="class")`，
-  避免每个用例重复建数据（高频坑：scope 默认 function 导致数据被反复创建/清理）
-- **断言三层**：状态码 → 响应体字段/类型 → 数据库副作用（用 conftest 已有的 DB 查询能力）
-- **DB 元数据校验**（涉及建表/查库的用例）：写 SQL 断言前先确认表名/字段真实存在
-  （`codegraph query` 或读 Mapper XML/实体类核对），SQL 标识符加反引号防关键字冲突；
-  别假设字段名——查不到的字段断言会让测试"假绿失败"。
-
-**双轨覆盖交叉自检（A4，找真漏场景）** ⭐ 依赖 A2+A3 产物
-
-scenario.md 的"需求侧测试点"和 api_definition.json 的"代码侧 testPoints"
-（A2 提炼）做矩阵交叉，分三级标记，**双轨都未覆盖的才是真漏**：
-- 🔴 需求侧明确要求但未设计场景 → **必补**
-- 🟠 代码侧有逻辑（如 SQL 有 WHERE 分支）但无场景触发 → 补
-- 🟡 仅代码侧细节、需求未要求 → 可低优先
-
-跑完 JaCoCo 后用 `qa coverage --gap-report` 拿代码侧未覆盖行，
-与 scenario.md 未覆盖测试点对照，输出"双轨漏场景"清单驱动补用例。
-
-#### Mobile（Android/iOS/Flutter/RN）
-
-| 维度 | 必测场景 | 用例类型 |
-|---|---|---|
-| **生命周期** | 前后台切换、横竖屏旋转、低内存kill恢复 | 状态转换 |
-| **权限** | 首次弹窗、拒绝后降级、设置页手动开关 | 异常分支 |
-| **网络** | 无网提示、弱网加载超时、WiFi→4G切换 | 容错 |
-| **数据持久化** | 本地缓存、杀进程后数据不丢、清缓存后恢复 | 功能+状态 |
-| **手势/交互** | 滑动、长按、双击、下拉刷新、上拉加载 | 功能 |
-| **推送/通知** | 前台收到、后台收到、点击跳转正确页面 | 集成 |
+全栈项目（同时含前后端）：分别 Read 涉及的分册。
 
 ### 用例数量标准（按模块复杂度）
 
