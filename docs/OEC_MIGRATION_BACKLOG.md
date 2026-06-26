@@ -46,7 +46,9 @@
 - **迁移方式**：借鉴重写进 `qa-test-engineer.md` 的 API 设计章节，落地 `qa/backend/scenario.md`。
 - **依赖**：A2
 
-### A4. 双轨覆盖分析（需求侧×代码侧交叉找漏场景）★P2 中价值
+### A4. 双轨覆盖分析（需求侧×代码侧交叉找漏场景）★P2 中价值 ✅ 已完成
+- **实现**：qa-test-engineer.md 新增"双轨覆盖交叉自检"步骤（scenario.md 需求侧测试点 ×
+  api_definition.json 代码侧 testPoints 矩阵交叉，三级标记，配合 `qa coverage --gap-report`）。
 - **oec 怎么做**：`api-scenario-enhancer` 拿 scenario.md 的"需求侧测试点"和 jsonl 的"代码侧 testPoints"
   做矩阵交叉，识别"双轨都未覆盖"的真漏场景。coverage-analyzer 的双轨分级（🔴需求未覆盖/
   🟠代码未触发/🟡仅代码侧）同源。
@@ -55,7 +57,9 @@
 - **迁移方式**：借鉴提示词。
 - **依赖**：**强依赖 A2+A3 先落地**，否则无数据可交叉。
 
-### A5. 单接口/场景脚本生成规范 + DB 元数据校验 ★P1 中价值
+### A5. 单接口/场景脚本生成规范 + DB 元数据校验 ★P1 中价值 ✅ 已完成
+- **实现**：qa-test-engineer.md 新增"pytest 脚本生成规范 + DB 校验"步骤
+  （一接口一文件 / fixture scope=class / 断言三层 / DB 元数据预校验）。
 - **oec 怎么做**：`api-endpoint-test-generator`/`api-scenario-test-generator` 有"一接口一文件"、
   `fixture scope="class"` 防坑规范、`db_metadata_validation.md`（连库校验表名/字段、SQL 加反引号）。
 - **TestAgent 现状**：部分。`backend/adapter.py` 只生成 `assert True` 占位骨架，真内容靠 subagent；

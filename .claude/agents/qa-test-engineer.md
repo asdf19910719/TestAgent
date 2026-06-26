@@ -473,6 +473,29 @@ python -m qa_agent.cli.main scan-api \
 这把 Gatekeeper"防漏场景/主流程清单显式确认"的要求固化成**可检产物**——
 未覆盖的 P0/P1 测试点一目了然，比散文式设计更难漏。
 
+**pytest 脚本生成规范 + DB 校验（A5，降生成 bug 率）** ⭐
+
+生成 API pytest 脚本时遵守以下规范（借鉴 oec，避高频坑）：
+- **一接口一文件 / 一场景一文件**：`test_api_<method>_<path_slug>.py` / `test_scenario_<name>.py`，
+  不要把多接口塞一个文件（失败定位困难）
+- **fixture scope**：场景测试的前置数据用 `@pytest.fixture(scope="class")`，
+  避免每个用例重复建数据（高频坑：scope 默认 function 导致数据被反复创建/清理）
+- **断言三层**：状态码 → 响应体字段/类型 → 数据库副作用（用 conftest 已有的 DB 查询能力）
+- **DB 元数据校验**（涉及建表/查库的用例）：写 SQL 断言前先确认表名/字段真实存在
+  （`codegraph query` 或读 Mapper XML/实体类核对），SQL 标识符加反引号防关键字冲突；
+  别假设字段名——查不到的字段断言会让测试"假绿失败"。
+
+**双轨覆盖交叉自检（A4，找真漏场景）** ⭐ 依赖 A2+A3 产物
+
+scenario.md 的"需求侧测试点"和 api_definition.json 的"代码侧 testPoints"
+（A2 提炼）做矩阵交叉，分三级标记，**双轨都未覆盖的才是真漏**：
+- 🔴 需求侧明确要求但未设计场景 → **必补**
+- 🟠 代码侧有逻辑（如 SQL 有 WHERE 分支）但无场景触发 → 补
+- 🟡 仅代码侧细节、需求未要求 → 可低优先
+
+跑完 JaCoCo 后用 `qa coverage --gap-report` 拿代码侧未覆盖行，
+与 scenario.md 未覆盖测试点对照，输出"双轨漏场景"清单驱动补用例。
+
 #### Mobile（Android/iOS/Flutter/RN）
 
 | 维度 | 必测场景 | 用例类型 |
