@@ -384,6 +384,22 @@ Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matc
 | **响应式** | 关键页面在移动端/平板/桌面可用 | 兼容性 |
 | **网络异常** | 请求失败提示、超时重试、离线提示 | 容错 |
 
+**Vue 项目：先做前端静态分析（推荐，补运行时探测短板）** ⭐
+
+设计 Vue 前端用例前，先用静态分析提取路由→组件→字段/按钮/API 知识图，
+**不依赖登录成功**（运行时 Playwright 探测必须先登录才能拿元素，复杂前置时拿不到）：
+```bash
+python -m qa_agent.webui.analyzer.analyze \
+  --frontend-repo <前端项目根> --test-urls /目标路由 \
+  --output qa/run/frontend_knowledge.json
+```
+产出 `frontend_knowledge.json` 含：路由表、组件 form_fields（含中文 label/type）、
+按钮、调用的 API、element_index。用它做两件事：
+1. **设计用例**：知道页面有哪些字段/按钮/业务规则，断言带语义（"用户名"而非裸 selector）
+2. **喂给 e2e_enhancer**：静态知识 + 运行时 DOM 元素互补，生成更准的 Playwright 脚本
+
+仅 Vue2/Vue3 项目支持；非 Vue 或拿不到源码时跳过，回退到运行时探测。
+
 #### 后端 API 项目
 
 | 维度 | 必测场景 | 用例类型 |
