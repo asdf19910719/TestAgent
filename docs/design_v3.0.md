@@ -228,7 +228,7 @@ def main():
   },
   
   "impact_analysis": {
-    "mode": "gitnexus",
+    "mode": "codegraph",
     "diff_files": ["src/pages/login.tsx", "src/api/auth.ts"],
     "affected_symbols": ["LoginPage", "authenticate", "validateCredentials"],
     "depth_used": 3,
@@ -310,7 +310,7 @@ def main():
 # 执行选择（L1 Feature: 登录）
 
 运行 ID: run_20260616_100000
-影响面来源: GitNexus
+影响面来源: CodeGraph
 执行模式: L1
 
 ## 变更文件
@@ -381,29 +381,29 @@ created_by: qa-agent@v3.0
 
 ## 3. 影响面分析算法
 
-### 3.1 完整流程（GitNexus 模式）
+### 3.1 完整流程（CodeGraph 模式）
 
 ```python
-def analyze_impact_gitnexus(mode: str, scope: str, config: Config) -> List[TestCase]:
+def analyze_impact_codegraph(mode: str, scope: str, config: Config) -> List[TestCase]:
     """
     规范 §8.1 的完整实现
     """
     # 步骤 1: 取本次变更 diff
     diff = git_diff('HEAD~1', 'HEAD')
     
-    # 步骤 2: 调用 GitNexus 工具
+    # 步骤 2: 调用 CodeGraph 工具
     try:
-        changed_symbols = mcp_gitnexus_detect_changes(diff)
+        changed_symbols = mcp_codegraph_detect_changes(diff)
     except MCPError as e:
         # §8.4: 不得静默回退
-        raise ImpactAnalysisError(f"GitNexus 不可用: {e}. 请选择: 等待修复 / 切到 local 模式 / 取消")
+        raise ImpactAnalysisError(f"CodeGraph 不可用: {e}. 请选择: 等待修复 / 切到 local 模式 / 取消")
     
     affected_symbols = []
     depth_map = {'L0': 2, 'L1': 3, 'L2': 3, 'L3': -1, 'L4': 3}
     depth = depth_map[mode]
     
     for sym in changed_symbols:
-        upstream = mcp_gitnexus_impact(
+        upstream = mcp_codegraph_impact(
             target=sym,
             direction='upstream',
             max_depth=depth
@@ -1123,7 +1123,7 @@ project_type: web
 frameworks:
   unit: vitest
   e2e: playwright
-impact_analysis: gitnexus
+impact_analysis: codegraph
 mode_limits:
   L1: 80
 ```
@@ -1974,7 +1974,7 @@ def save_case(case: TestCase):
 ```python
 def run_with_retry(func, max_attempts=3, backoff=2):
     """
-    LLM 调用、GitNexus 调用的重试装饰器
+    LLM 调用、CodeGraph 调用的重试装饰器
     """
     import time
     
@@ -2375,19 +2375,19 @@ mypy = "^1.11"
 - 输出 selection.md（基于 git diff）
 - 写入含 checkpoint 字段的 last.json
 
-### 10.2 Phase 2: GitNexus + 两角色分离（1 周）
+### 10.2 Phase 2: CodeGraph + 两角色分离（1 周）
 
-**目标**：GitNexus 集成 + DesignerRunner / Gatekeeper 独立
+**目标**：CodeGraph 集成 + DesignerRunner / Gatekeeper 独立
 
 **任务**：
-- [ ] 实现 GitNexus 影响面分析（§3.1 完整流程）
+- [ ] 实现 CodeGraph 影响面分析（§3.1 完整流程）
 - [ ] 实现 DesignerRunner LLM 调用（使用 Claude Code Workflow 工具）
 - [ ] 实现 Gatekeeper 独立进程（subprocess 调用）
 - [ ] 实现提示词模板加载（prompts/ 目录）
 - [ ] 单元测试：影响面分析、补集兜底
 
 **产物**：
-- GitNexus 模式可用
+- CodeGraph 模式可用
 - DesignerRunner 能生成用例 YAML（手写 Adapter stub）
 - Gatekeeper 能输出 final_test_report.md
 
@@ -2463,9 +2463,9 @@ mypy = "^1.11"
 ```python
 # tests/test_impact_analysis.py
 
-def test_gitnexus_mode_direct_hit():
+def test_codegraph_mode_direct_hit():
     """
-    测试 GitNexus 模式直接命中
+    测试 CodeGraph 模式直接命中
     """
     mock_cases = [
         TestCase(id='TC-001', targets={'symbols': ['LoginPage']}),
@@ -2474,7 +2474,7 @@ def test_gitnexus_mode_direct_hit():
     
     mock_affected_symbols = ['LoginPage', 'authenticate']
     
-    result = analyze_impact_gitnexus_mock(
+    result = analyze_impact_codegraph_mock(
         changed_symbols=['LoginPage'],
         all_cases=mock_cases,
         affected_symbols=mock_affected_symbols

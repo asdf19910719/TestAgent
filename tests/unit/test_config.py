@@ -19,7 +19,7 @@ class TestConfig:
             config_path = Path(tmpdir) / 'nonexistent.yml'
             config = load_config(str(config_path))
 
-            assert config['impact_analysis'] == 'gitnexus'
+            assert config['impact_analysis'] == 'codegraph'
             assert config['mode_limits']['L0'] == 10
             assert config['repair_loop']['mode'] == 'manual'
 
@@ -62,7 +62,7 @@ class TestConfig:
             assert loaded['language'] == 'typescript'
             assert loaded['frameworks']['unit'] == 'vitest'
             # 默认值也应该合并进来
-            assert loaded['impact_analysis'] == 'gitnexus'
+            assert loaded['impact_analysis'] == 'codegraph'
 
     def test_user_config_overrides_default(self):
         """用户配置应该覆盖默认值"""

@@ -116,7 +116,7 @@ Solo Edition = **产品级质量 + 个人级流程**。
 12. **引导式初始化**（§18.1 重写）：`/qa init` 自动检测 + 生成草稿 + 交互引导
 13. **灵活 bug 引用**（§7.2）：支持 BUG-XXX / TC-XXX / #issue / 关键词 / 自然语言
 14. **智能下一步提示**（§13.6 新增）：每次执行后输出"建议下一步"
-15. **GitNexus 降级交互**（§8.4）：不可用时提供选项菜单（重试/local/手动/取消）
+15. **CodeGraph 降级交互**（§8.4）：不可用时提供选项菜单（重试/local/手动/取消）
 
 ---
 
@@ -506,14 +506,14 @@ Agent 内部解析顺序：
 
 ## 8. 影响面分析（执行裁剪算法）
 
-执行阶段"跑哪些用例"由影响面分析决定。本规范**默认依赖 GitNexus**，仅在用户显式禁用时才回退到本地 diff。
+执行阶段"跑哪些用例"由影响面分析决定。本规范**默认依赖 CodeGraph**，仅在用户显式禁用时才回退到本地 diff。
 
-### 8.1 默认实现（GitNexus 模式）
+### 8.1 默认实现（CodeGraph 模式）
 
 1. 取本次变更的 diff
-2. 调用 GitNexus 工具：
-   * `mcp__gitnexus__detect_changes`：拿到变更涉及的符号列表
-   * 对每个变更符号调用 `mcp__gitnexus__impact`，方向 `upstream`，深度按下表
+2. 调用 CodeGraph 工具：
+   * `mcp__codegraph__codegraph_explore`：拿到变更涉及的符号列表
+   * 对每个变更符号调用 `mcp__codegraph__codegraph_node`，方向 `upstream`，深度按下表
 3. 把受影响符号集合反查 `qa/cases/*.yml` 中 `targets:` 字段，命中即纳入执行集
 4. **补集兜底**：命中用例的 `feature_id` 集合 → 纳入同 `feature_id` 的所有用例（L2/L3 全开；L1 仅 P0/P1）
 5. 历史 flaky / 易失败用例额外纳入
@@ -539,7 +539,7 @@ Agent 内部解析顺序：
 
 ```yaml
 # .qa-agent.yml
-gitnexus:
+codegraph:
   upstream_depth:
     L0: 2
     L1: 3
@@ -548,7 +548,7 @@ gitnexus:
     L4: 5     # 默认 3，动态语言项目建议提到 5
 ```
 
-### 8.2 Local 模式（GitNexus 不可用时）
+### 8.2 Local 模式（CodeGraph 不可用时）
 
 基于 git diff 与用例 `targets.files` 字段字符串匹配：
 
@@ -561,16 +561,16 @@ gitnexus:
 * 用户必须能追加用例 ID 或 tag
 * Agent 不得单方面缩减用户提供的执行集
 
-### 8.4 GitNexus 不可用时的处理（P2-4 交互式降级）
+### 8.4 CodeGraph 不可用时的处理（P2-4 交互式降级）
 
-GitNexus 工具调用失败 → Agent **不得静默回退**，必须明确告知并提供选项菜单：
+CodeGraph 工具调用失败 → Agent **不得静默回退**，必须明确告知并提供选项菜单：
 
 ```text
 [Agent] 正在分析影响面...
-❌ GitNexus 工具不可用：连接超时（已重试 2 次）
+❌ CodeGraph 工具不可用：连接超时（已重试 2 次）
 
 可选操作：
-  1. 等待 GitNexus 恢复（重试：/qa retry）
+  1. 等待 CodeGraph 恢复（重试：/qa retry）
   2. 切换到本地 diff 模式（快速但精度低：会标注"影响面分析为粗粒度近似"）
   3. 手动指定执行范围（精确但慢：/qa feature 登录 --cases TC-LOGIN-*）
   4. 取消本次运行
@@ -582,7 +582,7 @@ GitNexus 工具调用失败 → Agent **不得静默回退**，必须明确告�
 
 ```yaml
 # .qa-agent.yml
-impact_analysis: gitnexus       # gitnexus（默认） | local
+impact_analysis: codegraph       # codegraph（默认） | local
 impact_fallback: prompt         # prompt（默认） | local | fail
 
 # prompt: 交互式询问（默认）
@@ -595,9 +595,9 @@ impact_fallback: prompt         # prompt（默认） | local | fail
 回退到 local 模式时，`qa/run/selection.md` 必须在头部加显著警告：
 
 ```markdown
-> ⚠️ **本次未使用 GitNexus 代码图**
+> ⚠️ **本次未使用 CodeGraph 代码图**
 > 影响面分析为粗粒度文件名前缀匹配，可能漏选用例
-> 建议尽快恢复 GitNexus 后重跑 /qa retry
+> 建议尽快恢复 CodeGraph 后重跑 /qa retry
 ```
 
 ---
@@ -785,7 +785,7 @@ frameworks:
   integration: vitest
   e2e: playwright
 
-impact_analysis: gitnexus           # gitnexus（默认） | local
+impact_analysis: codegraph           # codegraph（默认） | local
 
 mode_limits:
   L0: 10
@@ -872,7 +872,7 @@ secrets:
   env_prefix: QA_
 
 # 影响面分析深度调优（P0-2）
-gitnexus:
+codegraph:
   upstream_depth:
     L0: 2
     L1: 3
@@ -880,7 +880,7 @@ gitnexus:
     L3: -1
     L4: 3                                     # 动态语言项目可调高至 5
 
-# GitNexus 不可用时降级策略（P2-4）
+# CodeGraph 不可用时降级策略（P2-4）
 impact_fallback: prompt                       # prompt（默认） | local | fail
 ```
 
@@ -1318,7 +1318,7 @@ $ /qa init
   ✓ 检测到 TypeScript（tsconfig.json）
   ✓ 检测到 Playwright（playwright.config.ts）
   ✓ 检测到 Vitest（vitest.config.ts）
-  ✓ 检测到 GitNexus MCP 工具
+  ✓ 检测到 CodeGraph MCP 工具
   ✓ 检测到需求文档：docs/requirements.md
   ✓ 检测到 BMAD 产出：.bmad/output/
   ✓ 检测到 8 个已有 vitest 测试 / 3 个 Playwright 测试
@@ -1330,7 +1330,7 @@ $ /qa init
   frameworks:
     unit: vitest
     e2e: playwright
-  impact_analysis: gitnexus
+  impact_analysis: codegraph
   
   paths:
     layers:
@@ -1461,7 +1461,7 @@ $ /qa init
 将以 [L?] 模式执行
 设计阶段：[新增/复核 N 条用例 | 跳过]
 执行阶段：[选中 M 条用例（P0=a, P1=b, P2=c）]
-影响面来源：[GitNexus | local]
+影响面来源：[CodeGraph | local]
 非功能测试：[启用 / 跳过]
 修复轮模式：[manual | auto-dev | auto-fixer]
 单次上限：[X 条]
@@ -1665,7 +1665,7 @@ Dev Agent 读取 bugs/ 并修复
 它必须遵守的红线（见文档第 5.5、22 章）：
 - 不得伪造、不得降档、不得缩减执行集、不得删除失败测试、不得绕过断言、不得在生产环境运行、只有 Gatekeeper 能 verified。
 
-影响面分析默认依赖 GitNexus，调用失败时不得静默回退，必须报告并请示。
+影响面分析默认依赖 CodeGraph，调用失败时不得静默回退，必须报告并请示。
 
 预算：
 - 不设 token 上限
@@ -1704,10 +1704,10 @@ Dev Agent 读取 bugs/ 并修复
   红线触发可被检出
 ```
 
-### 24.2 v0.5 —— L0/L2 + GitNexus 默认
+### 24.2 v0.5 —— L0/L2 + CodeGraph 默认
 
 * 增加 L0、L2 模式
-* 影响面默认 GitNexus，缺失时按 8.4 处理
+* 影响面默认 CodeGraph，缺失时按 8.4 处理
 * 增加对抗式 review（仅 L2）
 * 用例 `targets` 由 indexer 自动产出
 * 适配器：**Web + Backend 两个完整实现**

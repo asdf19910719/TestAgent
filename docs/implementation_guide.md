@@ -10,7 +10,7 @@
 1. 三角色工程骨架（session 划分、文件锁、状态恢复）
 2. 需求语义指纹（§5.9 落地）
 3. Flaky 检测、Mutation 抽样、对抗式 review（§5.6 落地）
-4. 影响面分析与 GitNexus 漏选兜底（§8 落地）
+4. 影响面分析与 CodeGraph 漏选兜底（§8 落地）
 5. 用例 YAML：targets 自动维护、secret 引用、KPI 反馈通道（§9 落地）
 6. Adapter 能力声明矩阵（§14 落地）
 7. CLI 输出规范（终端体验）

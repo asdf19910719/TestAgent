@@ -18,7 +18,7 @@ class ImpactAnalyzer:
     @property
     def mode(self) -> str:
         """动态读取 impact_analysis 模式（支持运行时覆盖）"""
-        return self.config.get('impact_analysis', 'gitnexus')
+        return self.config.get('impact_analysis', 'codegraph')
 
     def analyze(
         self,
@@ -30,7 +30,7 @@ class ImpactAnalyzer:
         """
         执行影响面分析
         返回: {
-            'mode': 'gitnexus' | 'local' | 'full',
+            'mode': 'codegraph' | 'local' | 'full',
             'diff_files': List[str],
             'affected_symbols': List[str],
             'selected_cases': List[TestCase]
@@ -58,19 +58,19 @@ class ImpactAnalyzer:
                 'selected_cases': active_cases
             }
 
-        if self.mode == 'gitnexus':
+        if self.mode == 'codegraph':
             try:
-                return self._analyze_gitnexus(mode, all_cases, diff_base, scope)
+                return self._analyze_codegraph(mode, all_cases, diff_base, scope)
             except Exception as e:
                 fallback = self.config.get('impact_fallback', 'prompt')
                 if fallback == 'local':
-                    print(f"⚠️ GitNexus 不可用: {e}. 回退到 local 模式")
+                    print(f"⚠️ CodeGraph 不可用: {e}. 回退到 local 模式")
                     return self._analyze_local(mode, all_cases, diff_base, scope)
                 elif fallback == 'fail':
                     raise
                 else:
                     raise RuntimeError(
-                        f"GitNexus 不可用: {e}\n"
+                        f"CodeGraph 不可用: {e}\n"
                         f"请选择: 1) 等待修复 2) 切到 local 模式 3) 取消"
                     )
         else:
@@ -127,7 +127,7 @@ class ImpactAnalyzer:
             'selected_cases': self._deduplicate(final_selection)
         }
 
-    def _analyze_gitnexus(
+    def _analyze_codegraph(
         self,
         mode: Mode,
         all_cases: List[TestCase],
@@ -135,27 +135,27 @@ class ImpactAnalyzer:
         scope: str = None
     ) -> Dict[str, Any]:
         """
-        GitNexus 模式：基于代码图精确分析（规范 §8.1）
-        Phase 2 实现
+        CodeGraph 模式：基于代码图精确分析（规范 §8.1）
         """
-        from .gitnexus import get_gitnexus_client
+        from .codegraph import get_codegraph_client
 
-        # 步骤 1: 获取 GitNexus 客户端（使用 .qa-agent.yml 配置的 MCP 工具前缀列表）
-        gitnexus_config = self.config.get('gitnexus', {})
-        client = get_gitnexus_client(gitnexus_config)
+        # 步骤 1: 获取 CodeGraph 客户端（使用 .qa-agent.yml 配置的 MCP 工具前缀列表）
+        codegraph_config = self.config.get('codegraph', {})
+        client = get_codegraph_client(codegraph_config)
 
         if not client.check_availability():
             prefixes_str = ', '.join(client.mcp_tool_prefixes)
             raise RuntimeError(
-                f"GitNexus 不可用\n"
+                f"CodeGraph 不可用\n"
                 f"配置的 MCP 工具前缀（按优先级）: {prefixes_str}\n"
                 f"请检查：\n"
-                f"  1. MCP 服务是否启动\n"
-                f"  2. .qa-agent.yml 中 gitnexus.mcp_tool_prefixes 是否正确\n"
-                f"     默认: ['mcp__gitnexus', 'mcp__gitnexus22']  # 依次尝试\n"
-                f"  3. 如本机仅用 gitnexus22，配置：\n"
-                f"     gitnexus:\n"
-                f"       mcp_tool_prefixes: ['mcp__gitnexus22']"
+                f"  1. codegraph CLI 是否在 PATH（npm i -g @colbymchenry/codegraph）\n"
+                f"  2. 本项目是否已索引（codegraph init）\n"
+                f"  3. .qa-agent.yml 中 codegraph.mcp_tool_prefixes 是否正确\n"
+                f"     默认: ['mcp__codegraph']\n"
+                f"  4. 如本机服务名不同，配置：\n"
+                f"     codegraph:\n"
+                f"       mcp_tool_prefixes: ['mcp__codegraph']"
             )
 
         # 步骤 2: git diff
@@ -166,7 +166,7 @@ class ImpactAnalyzer:
         changed_symbols = client.detect_changes(diff_content)
 
         # 步骤 4: 影响面分析（upstream）
-        depth = self.config.get('gitnexus', {}).get('upstream_depth', {}).get(mode.value, 3)
+        depth = self.config.get('codegraph', {}).get('upstream_depth', {}).get(mode.value, 3)
         affected_symbols = []
 
         for symbol in changed_symbols:
@@ -174,7 +174,7 @@ class ImpactAnalyzer:
                 upstream = client.impact_analysis(symbol, direction='upstream', max_depth=depth)
                 affected_symbols.extend(upstream)
             except Exception as e:
-                print(f"⚠️ GitNexus 分析符号 {symbol} 失败: {e}")
+                print(f"⚠️ CodeGraph 分析符号 {symbol} 失败: {e}")
 
         affected_symbols = list(set(affected_symbols + changed_symbols))
 
@@ -209,7 +209,7 @@ class ImpactAnalyzer:
         )
 
         return {
-            'mode': 'gitnexus',
+            'mode': 'codegraph',
             'diff_files': diff_files,
             'affected_symbols': affected_symbols,
             'selected_cases': self._deduplicate(final_selection)
@@ -269,7 +269,7 @@ class ImpactAnalyzer:
         scope 兜底：当 targets 匹配为空导致 selection 为空时，按 scope 关联 feature。
 
         背景：用例 YAML 缺 targets 字段时（Adapter/Indexer 未回填），
-        gitnexus/local 的 targets 匹配会全部落空 → selection=0 → 一条都不跑。
+        codegraph/local 的 targets 匹配会全部落空 → selection=0 → 一条都不跑。
         此时若用户给了明确 scope（feature/module 名），按 feature_id 关联兜底。
 
         触发条件（两者都满足才兜底，避免误扩范围）：

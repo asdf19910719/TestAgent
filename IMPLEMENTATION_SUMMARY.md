@@ -45,9 +45,9 @@ Claude Code → /qa slash command → Task 工具委派 → Subagent
 - [x] CLI 入口（cli/main.py：完整命令行接口）
 - [x] 11 个单元测试全部通过
 
-### Phase 2: GitNexus + 两角色分离（✅ 完成）
-- [x] GitNexus MCP 封装（gitnexus.py）
-- [x] GitNexus 影响面分析完整实现
+### Phase 2: CodeGraph + 两角色分离（✅ 完成）
+- [x] CodeGraph MCP 封装（codegraph.py）
+- [x] CodeGraph 影响面分析完整实现
 - [x] DesignerRunner 实现（designer_runner.py）
 - [x] Gatekeeper 独立判定（gatekeeper.py）
 - [x] Bug 引用解析算法（bug_resolver.py，P2-2）
@@ -93,7 +93,7 @@ Claude Code → /qa slash command → Task 工具委派 → Subagent
 - **L4 Bugfix**：修 bug 后验证，5-10 分钟
 
 ### ✅ 影响面驱动
-- GitNexus 模式（基于代码图精确分析）
+- CodeGraph 模式（基于代码图精确分析）
 - Local 模式（git diff + 文件名前缀匹配）
 - 用户扩充接口（手动追加用例）
 

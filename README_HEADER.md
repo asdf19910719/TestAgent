@@ -61,7 +61,7 @@ qa init
 **4. 检查配置（可选）**：
 ```yaml
 # 编辑 .qa-agent.yml 确认自动检测正确
-# 特别是 gitnexus.mcp_tool_prefixes（本机如用 gitnexus22 可调整）
+# 特别是 codegraph.mcp_tool_prefixes（默认 mcp__codegraph，本机服务名不同可调整）
 ```
 
 然后在 Claude Code 中打开你的项目。

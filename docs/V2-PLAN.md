@@ -40,7 +40,7 @@
   │     └── 学习反馈（记录是否被推翻）
   │
   └── Agent: qa-impact-analyzer（新增，可选）
-        ├── 代码层：git diff + GitNexus 符号分析
+        ├── 代码层：git diff + CodeGraph 符号分析
         ├── 语义层：LLM 理解业务含义
         └── 输出：影响范围 + 推荐用例 + 覆盖缺口
 ```

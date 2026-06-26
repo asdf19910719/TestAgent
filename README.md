@@ -58,7 +58,7 @@ AI Test Engineer Agent 帮助个人开发者把 AI 产出的代码从"看起来�
 
 1. **Claude Code** 已安装
 2. **Python 3.11+** 已安装
-3. （可选）GitNexus MCP 已配置（用于精准影响面分析）
+3. （可选）CodeGraph MCP 已配置（用于精准影响面分析）
 
 ### 安装
 
@@ -115,7 +115,7 @@ qa init   # 自动检测项目类型、框架、需求文档，生成 .qa-agent.
 **4. 检查配置（可选）**：
 ```yaml
 # 编辑 .qa-agent.yml 确认自动检测
-# 特别是 gitnexus.mcp_tool_prefixes（本机如用 gitnexus22 可调整）
+# 特别是 codegraph.mcp_tool_prefixes（默认 mcp__codegraph，本机服务名不同可调整）
 ```
 
 ### 接入项目
@@ -162,7 +162,7 @@ qa status
 
 ### ✅ 影响面驱动
 
-- **GitNexus 模式**（基于代码图精准分析）
+- **CodeGraph 模式**（基于代码图精准分析）
 - **Local 模式**（git diff + 文件名前缀匹配）
 - 用户可扩充执行集，Agent 不可单方面缩减
 
@@ -375,18 +375,26 @@ requirements:
   bdd_dir: scenarios/
 ```
 
-## GitNexus MCP 适配
+## CodeGraph MCP 适配
 
-如果本机的 GitNexus MCP 服务名是 `gitnexus22`（而非默认 `gitnexus`），需在 `.qa-agent.yml` 配置：
+本项目影响面分析默认用 CodeGraph。首次使用需在项目根目录建索引（之后自动同步，无需手动重建）：
+
+```bash
+npm i -g @colbymchenry/codegraph   # 安装 CLI（一次）
+codegraph install                  # 连接到 Claude Code / Codex 等（一次）
+codegraph init                     # 在本项目建索引（一次，之后自动同步）
+```
+
+如果本机的 CodeGraph MCP 服务名不是默认的 `codegraph`，需在 `.qa-agent.yml` 配置：
 
 ```yaml
-gitnexus:
-  mcp_tool_prefix: mcp__gitnexus22  # 默认 mcp__gitnexus
+codegraph:
+  mcp_tool_prefixes: ['mcp__codegraph']  # 默认 mcp__codegraph
 ```
 
 或临时通过环境变量切换：
 ```bash
-export QA_GITNEXUS_TOOL_PREFIX=mcp__gitnexus22
+export QA_CODEGRAPH_TOOL_PREFIX=mcp__codegraph
 ```
 
 ## License

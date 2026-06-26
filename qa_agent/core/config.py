@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     'project_type': None,
     'language': None,
     'frameworks': {},
-    'impact_analysis': 'gitnexus',
+    'impact_analysis': 'codegraph',
     'mode_limits': {
         'L0': 10,
         'L1': 80,
@@ -61,9 +61,9 @@ DEFAULT_CONFIG = {
         'max_retry_on_script_error': 1,  # 脚本错误最多重试次数
         'report_format': 'html',  # html | json | both
     },
-    'gitnexus': {
+    'codegraph': {
         # MCP 工具前缀（列表，按优先级依次尝试）
-        'mcp_tool_prefixes': ['mcp__gitnexus', 'mcp__gitnexus22'],
+        'mcp_tool_prefixes': ['mcp__codegraph'],
         'upstream_depth': {
             'L0': 2,
             'L1': 3,

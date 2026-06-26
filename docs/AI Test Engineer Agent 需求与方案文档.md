@@ -15,7 +15,7 @@
 * **拆分单 Agent → 三角色**（QA-Designer / QA-Runner / QA-Gatekeeper），降低确认偏差与上下文过载。
 * **新增 5 档运行模式 L0–L4**，按变更范围与场景裁剪测试范围，避免每次改动都跑全流程。
 * **测试用例改为结构化资产**（YAML 长期存储 + Markdown 视图），增量演进而非重复生成。
-* **影响面分析默认基于 GitNexus**，仅在用户显式禁用时回退到 diff + 用例索引。
+* **影响面分析默认基于 CodeGraph**，仅在用户显式禁用时回退到 diff + 用例索引。
 * **新增非功能性测试落地规范**（性能 / 安全 / 兼容）。
 * **新增测试代码自身质量保证**（覆盖率门槛、mutation 抽样、对抗式 review、flaky 检测）。
 * **新增失败循环防护**（重试上限、自修复轮数上限、强制升级人工）。
@@ -32,7 +32,7 @@
 * **需求绑定改为段落语义指纹**：`requirement_hash` 改为规范化文本 hash + LLM 相似度比对 fallback（5.9 / 9.2）。
 * **mutation / flaky 成本收敛**：mutation 仅对**本次 diff 涉及代码**抽样、仅 L3 全量；flaky **只对失败用例隔离重跑**，通过用例由 `history.json` 滚动统计（5.6 / 11）。
 * **L3 允许"维度切片"**：可显式跳过非功能/兼容某些维度，但必须在 `release_gate_report` 登记"未覆盖维度"，避免"全有或全无"导致的私下绕规则（7.1 / 18.2）。
-* **GitNexus 漏选兜底**：以 `feature_id` / `regression_tags` 为补集，覆盖动态语言、跨进程、配置驱动调用看不到的情形（8.5）。
+* **CodeGraph 漏选兜底**：以 `feature_id` / `regression_tags` 为补集，覆盖动态语言、跨进程、配置驱动调用看不到的情形（8.5）。
 * **触发场景区分**：人触发需用户确认；Agent / 批处理触发可走 `auto_confirm`；自动场景下 Agent 仍不得降档（5.5 / 18.4）。
 * **反向梳理签字落地**：通过 commit 作者白名单 + `qa/signoff/*.yml` 外部签批文件实现机器可强制（6.4）。
 * **安全用例 waiver 分级**：critical/high 不允许 waiver，medium/low 允许有限 waiver（必须附 PoC 不可达证据 + 更短过期）（5.8）。
@@ -419,26 +419,26 @@ L3：三角色全开 + 对抗式 review + mutation + 非功能 + flaky + waiver 
 
 ## 8. 影响面分析（执行裁剪算法）
 
-执行阶段"跑哪些用例"由影响面分析决定。本规范**默认依赖 GitNexus** 作为代码图来源，仅在用户显式禁用时才回退到本地 diff + 用例索引。
+执行阶段"跑哪些用例"由影响面分析决定。本规范**默认依赖 CodeGraph** 作为代码图来源，仅在用户显式禁用时才回退到本地 diff + 用例索引。
 
-### 8.1 默认实现（GitNexus 模式）
+### 8.1 默认实现（CodeGraph 模式）
 
 1. 取本次变更的 diff（git diff，或用户显式提供的代码区间）。
-2. 调用 GitNexus 工具：
-   * `mcp__gitnexus__detect_changes`：拿到变更涉及的符号列表与受影响 process。
-   * 对每个变更符号调用 `mcp__gitnexus__impact`，方向 `upstream`，深度按模式：**L0=2 / L1=3 / L2=3 / L3=不限 / L4=3**（动态语言/反射/依赖注入项目下，浅层深度极易漏选，故默认值已上调）。
+2. 调用 CodeGraph 工具：
+   * `mcp__codegraph__codegraph_explore`：拿到变更涉及的符号列表与受影响 process。
+   * 对每个变更符号调用 `mcp__codegraph__codegraph_node`，方向 `upstream`，深度按模式：**L0=2 / L1=3 / L2=3 / L3=不限 / L4=3**（动态语言/反射/依赖注入项目下，浅层深度极易漏选，故默认值已上调）。
 3. 把受影响符号集合反查 `qa/cases/*.yml` 中 `targets:` 字段，命中即纳入执行集。
-4. **补集兜底（强制）**：GitNexus 难以追踪反射、装饰器、字符串路由、依赖注入、跨进程/跨服务调用。Agent 必须按以下规则补充执行集：
+4. **补集兜底（强制）**：CodeGraph 难以追踪反射、装饰器、字符串路由、依赖注入、跨进程/跨服务调用。Agent 必须按以下规则补充执行集：
    * 命中用例的 `feature_id` 集合 → 纳入同 `feature_id` 的所有用例（L2/L3 全开；L1 仅同 feature_id 内 P0/P1）。
    * 变更文件路径前缀匹配的 `regression_tags`（项目可在 `.qa-agent.yml` 配置 `path_to_tags` 映射）→ 纳入相应 tag 下所有用例。
    * 历史"易随此变更失败"的用例（`qa/run/history.json` 中与当前 diff 文件 cohort 关联失败 ≥ 2 次）→ 纳入。
 5. 命中用例的兄弟用例（同 `feature_id`）在 L2/L3 下也纳入（与 4 重叠时去重）。
 6. 历史 flaky / 易失败用例额外纳入（来自 `qa/run/history.json`）。
-7. 输出执行集 + 选择理由（写入 `qa/run/selection.md`），每条用例标注命中来源（`gitnexus_upstream` / `feature_cohort` / `tag_match` / `history_correlation` / `flaky_followup` / `user_added`）。
+7. 输出执行集 + 选择理由（写入 `qa/run/selection.md`），每条用例标注命中来源（`codegraph_upstream` / `feature_cohort` / `tag_match` / `history_correlation` / `flaky_followup` / `user_added`）。
 
-### 8.2 回退实现（无 GitNexus）
+### 8.2 回退实现（无 CodeGraph）
 
-仅在用户在 `.qa-agent.yml` 设置 `impact_analysis: local` 或显式指令 `/qa --no-gitnexus` 时启用：
+仅在用户在 `.qa-agent.yml` 设置 `impact_analysis: local` 或显式指令 `/qa --no-codegraph` 时启用：
 
 1. 基于 git diff 拿到变更文件路径。
 2. 反查用例 `targets.files[]` 命中。
@@ -451,9 +451,9 @@ L3：三角色全开 + 对抗式 review + mutation + 非功能 + flaky + waiver 
 * **Agent 不得单方面缩减**用户提供的执行集。
 * 选择理由必须可读：`qa/run/selection.md` 列出每条入选用例的命中链路（变更符号 → 被测代码 → 用例）。
 
-### 8.4 GitNexus 不可用时的处理
+### 8.4 CodeGraph 不可用时的处理
 
-* GitNexus 工具调用失败 → Agent 必须明确告知用户"代码图不可用"，**不得静默回退**。
+* CodeGraph 工具调用失败 → Agent 必须明确告知用户"代码图不可用"，**不得静默回退**。
 * 用户可选择：等待修复 / 显式切到 local 模式 / 取消本次运行。
 
 ---
@@ -693,8 +693,8 @@ roles:
   runner_model: claude-opus-4-7
   gatekeeper_model: claude-sonnet-4-6  # 推荐 L3 异质，弱化共享盲区
 
-impact_analysis: gitnexus           # gitnexus（默认） | local
-gitnexus:
+impact_analysis: codegraph           # codegraph（默认） | local
+codegraph:
   fallback_supplement_tags: true    # 8.1 步骤 6：按 feature_id/regression_tags 兜底
   upstream_depth:
     L0: 1
@@ -782,7 +782,7 @@ secrets:
 # 用例 targets 自动维护
 targets_indexer:
   enabled: true
-  update_on_rename: true            # 借助 LSP / GitNexus 自动跟踪 rename/move
+  update_on_rename: true            # 借助 LSP / CodeGraph 自动跟踪 rename/move
 ```
 
 如果 `.qa-agent.yml` 不存在，Agent 在初始化阶段必须**先生成草稿并请用户确认**，不得使用未确认的默认值直接跑 L3。
@@ -1116,7 +1116,7 @@ Feature: 用户登录
 1. 扫描项目结构。
 2. 调用 Adapter `detect()` 识别项目类型、语言、框架、运行命令、构建命令。
 3. 检查 `.qa-agent.yml`，缺失则生成草稿请用户确认。
-4. 检查 GitNexus 可用性；不可用且用户未显式选择 local 模式 → 中止并请示。
+4. 检查 CodeGraph 可用性；不可用且用户未显式选择 local 模式 → 中止并请示。
 5. 输出 `qa/current_test_status.md`：当前测试能力评估、缺口清单。
 
 ### 18.2 L3 完整流程（设计 → 执行 → 决策）
@@ -1170,7 +1170,7 @@ Feature: 用户登录
 将以 [L?] 模式执行
 设计阶段：[新增/复核 N 条用例 | 跳过]
 执行阶段：[选中 M 条用例（P0=a, P1=b, P2=c）]
-影响面来源：[GitNexus | local]
+影响面来源：[CodeGraph | local]
 非功能测试：[启用 / 跳过]
 单次上限：[X 条] —— 当前选择 [是否触发熔断]
 触发来源：[human | agent | scheduled]
@@ -1323,7 +1323,7 @@ Dev Agent 读取 bugs/ 并修复
 13. 把状态 open → verified（必须由 Gatekeeper 写入）。
 14. 安全测试用例（critical/high）waiver。
 15. 在生产环境运行测试。
-16. GitNexus 调用失败时静默回退到 local（必须报告并请示）。
+16. CodeGraph 调用失败时静默回退到 local（必须报告并请示）。
 17. Gatekeeper 直接 trust Designer 的需求关联（必须独立溯源）。
 18. 把环境失败（ENV_FAIL）当作普通 FAIL 让 Gatekeeper 直接判 PASS/FAIL。
 19. 测试用例 YAML 中硬编码凭据（必须使用 `${env:NAME}` / `!secret name` 引用）。
@@ -1368,7 +1368,7 @@ Dev Agent 读取 bugs/ 并修复
 它必须遵守的红线（见文档第 5.5、22 章）：
 - 不得伪造、不得降档、不得缩减执行集、不得删除失败测试、不得绕过断言、不得在生产环境运行、安全用例不得 waiver、只有 Gatekeeper 能 verified。
 
-影响面分析默认依赖 GitNexus（mcp__gitnexus__detect_changes / impact），仅在用户显式 .qa-agent.yml 设置 impact_analysis: local 时才回退；调用失败时不得静默回退，必须报告并请示。
+影响面分析默认依赖 CodeGraph（mcp__codegraph__codegraph_explore / impact），仅在用户显式 .qa-agent.yml 设置 impact_analysis: local 时才回退；调用失败时不得静默回退，必须报告并请示。
 
 预算：
 - 不设 token 上限。
@@ -1391,7 +1391,7 @@ Dev Agent 读取 bugs/ 并修复
 
 * 单 Agent 简化执行（Designer 与 Runner 合并），但 Gatekeeper 必须独立。
 * 仅支持 L1 / L4 两档；不支持 L3，故**不能用作发版依据**。
-* 影响面用 local 模式即可（无需 GitNexus）。
+* 影响面用 local 模式即可（无需 CodeGraph）。
 * 用例 YAML schema 必须与 9.2 一致，但允许 schema 字段只填关键项；`targets` 允许人工填。
 * 必须有：用例库、bug 库、final/bug 报告、最简回归、`.qa-agent.yml` 草稿、25 章自检清单。
 * 强制红线（5.5、5.7）必须就位。
@@ -1408,11 +1408,11 @@ Dev Agent 读取 bugs/ 并修复
   自检清单 12 项全部输出
 ```
 
-### 24.2 v0.5 —— 三角色 + L0/L2 + GitNexus 默认 + targets 自动维护
+### 24.2 v0.5 —— 三角色 + L0/L2 + CodeGraph 默认 + targets 自动维护
 
 * 三角色完整拆分（Designer / Runner / Gatekeeper），含 §3.3 硬约束（独立溯源）。
 * 增加 L0、L2 模式。
-* 影响面默认 GitNexus，缺失时按 8.4 处理；增加 8.5 漏选兜底（feature_id / regression_tags 补集）。
+* 影响面默认 CodeGraph，缺失时按 8.4 处理；增加 8.5 漏选兜底（feature_id / regression_tags 补集）。
 * 增加对抗式 review（仅 L2/L3）。
 * `targets` 自动同步：用例 YAML 的 `targets.files` / `targets.symbols` 由 Adapter/Indexer 在 commit 时自动重写（rename/move），Designer 只填 `feature_id`。
 * 段落语义指纹（5.9）替换裸 hash，避免排版微调引发 stale 风暴。
@@ -1424,7 +1424,7 @@ Dev Agent 读取 bugs/ 并修复
 完成判据：
 
 ```text
-- /qa L0/L1/L2/L4 全部跑通，且 GitNexus 不可用时按 8.4 报告而非静默
+- /qa L0/L1/L2/L4 全部跑通，且 CodeGraph 不可用时按 8.4 报告而非静默
 - 三角色独立上下文，Gatekeeper 报告含「未能验证的事项」与「建议人工复核」
 - targets 字段在一次 git mv 后自动更新
 - KPI（缺陷逃逸率、误报率等）能从 qa/feedback/ 回流并写入 history.json
@@ -1498,7 +1498,7 @@ Dev Agent 读取 bugs/ 并修复
 [ ] 安全用例（critical/high）无 waiver；medium/low waiver 有 PoC 不可达性证据
 [ ] waivers.yml 无过期项；approved_by 已通过白名单校验
 [ ] manual 用例待签字清单已列出
-[ ] 影响面来源（GitNexus / local）已声明；GitNexus 漏选兜底已应用
+[ ] 影响面来源（CodeGraph / local）已声明；CodeGraph 漏选兜底已应用
 [ ] 运行模式已声明，且与触发指令一致；未自行降档
 [ ] 修复轮次未超 5.7 上限
 [ ] 未能验证的事项已列出（不允许空）
@@ -1529,7 +1529,7 @@ AI 写完代码
 ↓
 QA-Designer 增量更新用例库（结构化资产）
 ↓
-基于 GitNexus 影响面裁剪执行范围
+基于 CodeGraph 影响面裁剪执行范围
 ↓
 QA-Runner 执行 + 收集失败 + flaky 检测 + mutation 抽样
 ↓
@@ -1547,7 +1547,7 @@ QA-Gatekeeper 决策（含 waiver / 人工签字校验）
 ```text
 需求可追踪（每条用例绑定需求 + 段落 hash）
 测试可设计（结构化 YAML，可 diff 可演进）
-执行可裁剪（基于 GitNexus 影响面）
+执行可裁剪（基于 CodeGraph 影响面）
 执行可自动（Adapter 接口产物可重复）
 失败可复现（结构化 bug 报告 + 工件）
 修复可验证（仅 Gatekeeper 能 verified）

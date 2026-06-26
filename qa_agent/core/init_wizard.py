@@ -180,13 +180,13 @@ class InitWizard:
             'project_type': project_type_override or detected['project_type'] or 'generic',
             'language': detected['language'] or 'unknown',
             'frameworks': detected['frameworks'],
-            'impact_analysis': 'gitnexus' if detected['has_git'] else 'local'
+            'impact_analysis': 'codegraph' if detected['has_git'] else 'local'
         }
 
-        # GitNexus MCP 工具前缀（列表，按优先级尝试）
+        # CodeGraph MCP 工具前缀（列表，按优先级尝试）
         # 用户首次接入时会作为草稿出现在 .qa-agent.yml，可手动调整顺序
-        config['gitnexus'] = {
-            'mcp_tool_prefixes': ['mcp__gitnexus', 'mcp__gitnexus22'],
+        config['codegraph'] = {
+            'mcp_tool_prefixes': ['mcp__codegraph'],
         }
 
         # Generic 项目需要手动配置测试命令

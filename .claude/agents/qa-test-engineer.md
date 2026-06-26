@@ -587,34 +587,42 @@ notes: "自动发现的已有 E2E 测试（Playwright，验证真实用户交互
 
 ## 工作流（按模式分支）
 
-### GitNexus MCP 工具
+### CodeGraph 工具
 
-影响面分析需要调用 GitNexus MCP 工具。**工具名称由 `.qa-agent.yml` 的 `gitnexus.mcp_tool_prefixes` 决定（列表，依次尝试）**：
+影响面分析使用 CodeGraph。**优先用 CLI 直调**（Python/Bash 均可，无需 MCP）；
+subagent 内也可用 CodeGraph MCP 工具。**MCP 工具前缀由 `.qa-agent.yml` 的 `codegraph.mcp_tool_prefixes` 决定（列表，依次尝试）**：
 
-**默认配置（自动 fallback）**：
+**默认配置**：
 ```yaml
-gitnexus:
-  mcp_tool_prefixes: ['mcp__gitnexus', 'mcp__gitnexus22']
+codegraph:
+  mcp_tool_prefixes: ['mcp__codegraph']
 ```
 
-**调用策略**：
-1. 优先尝试 `mcp__gitnexus__detect_changes` / `mcp__gitnexus__impact`
-2. 如失败（工具不存在），自动降级到 `mcp__gitnexus22__detect_changes` / `mcp__gitnexus22__impact`
+**CLI 直调（首选，最稳）**：
+```bash
+codegraph impact <symbol>        # 改动某符号的爆炸半径
+codegraph affected <files...>    # 改动文件 → 受影响的测试文件
+codegraph callers <symbol>       # upstream 调用者
+codegraph explore "<问题/符号>"  # 区域探索：相关源码 + 调用路径
+```
+
+**MCP 工具（subagent 内）**：
+1. 优先尝试 `mcp__codegraph__codegraph_explore` / `mcp__codegraph__codegraph_node`
+2. 如失败（工具不存在），按 `mcp_tool_prefixes` 列表依次降级
 3. 如全部失败，提示用户在 `.qa-agent.yml` 配置实际服务名
 
-**自定义优先级**：
-```yaml
-gitnexus:
-  mcp_tool_prefixes: ['mcp__gitnexus22']  # 仅用 gitnexus22，跳过 fallback
-```
+**前置要求**：本项目需先索引（`codegraph init`，一次即可，之后自动同步）。
 
 **调用前先读取 `.qa-agent.yml`**，确认工具前缀列表。如全部尝试失败，提示：
 
 ```
-mcp__gitnexus / mcp__gitnexus22 均不可用。
-请在 .qa-agent.yml 配置本机实际服务名：
-  gitnexus:
-    mcp_tool_prefixes: ['mcp__gitnexus_v3']
+codegraph CLI / MCP 均不可用。
+请确认：
+  1. codegraph 已安装（npm i -g @colbymchenry/codegraph）
+  2. 本项目已索引（codegraph init）
+  3. .qa-agent.yml 配置本机实际服务名：
+     codegraph:
+       mcp_tool_prefixes: ['mcp__codegraph']
 ```
 
 ### L1 Feature 流程
