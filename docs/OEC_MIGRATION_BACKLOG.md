@@ -66,8 +66,11 @@
   （必须先成功登录才能拿元素，且只抓当前页 DOM，拿不到路由表/组件字段语义/API 调用关系）。
 - **补全价值**：解决两痛点：(1) 登录失败/复杂前置时运行时探测拿不到元素，静态分析无此依赖；
   (2) 给断言生成提供"字段中文名/业务规则"语义。与运行时探测形成"静态知识+动态元素"互补。
-- **迁移方式**：**整体复用代码**（analyze.py 纯静态、无平台耦合，可近乎原样移植为
-  `qa_agent/webui/analyzer/`，再把 frontend_knowledge.json 喂给 e2e_enhancer）。
+- **迁移方式**：**复用代码包**（核实：analyze.py 非单文件，依赖同级 `parsers/`
+  (vue_router_parser/vue2_component_parser) + `extractors/`(component_knowledge/
+  ui_surface_extractor) 共 5 个模块；经核实无平台耦合——grep 命中的 platform/token
+  全是 `sys.platform=="win32"`/文档注释/示例文本误报）。移植整个 scripts/ 包为
+  `qa_agent/webui/analyzer/`，再把 frontend_knowledge.json 喂给 e2e_enhancer。
 - **配套**：`uitest-source-fetcher`（git clone 前端仓库）可一并轻量移植作前置。
 
 ### W2. 需求预审（执行前 6 维度门禁）★P2 中价值
