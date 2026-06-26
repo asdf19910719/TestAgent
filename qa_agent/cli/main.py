@@ -623,6 +623,61 @@ def coverage(xml_path, source_roots, fmt, gap_report):
                 click.echo(f"- [{kind}] {g['class_name']}:{g['line_num']}{code}")
 
 
+@cli.command(name='scan-api')
+@click.option('--source-root', 'source_root', required=True,
+              help='Java 源码根目录（如 src/main/java 或 app/src/main/java）')
+@click.option('--format', 'fmt', type=click.Choice(['json', 'markdown']),
+              default='json', help='输出格式（默认 json，对齐 api_definition.json）')
+@click.option('--output', 'output_path', default=None,
+              help='输出文件路径（不指定则打印到 stdout）')
+def scan_api(source_root, fmt, output_path):
+    """
+    [Subagent 用] 扫描 Spring MVC 源码提取接口清单（A1 接口发现）
+
+    源码模式（正则解析，无需编译），输出对齐 api_definition.json 的
+    {'apis': [{method, path, class, handler, source_file}]} 结构，
+    供后续 API 用例设计 + 覆盖率应测接口数计算。
+
+    示例：
+      qa scan-api --source-root src/main/java
+      qa scan-api --source-root app/src/main/java --output qa/run/api_definition.json
+    """
+    from ..core.api_scanner import scan_spring_apis
+
+    try:
+        result = scan_spring_apis(source_root)
+    except FileNotFoundError:
+        click.echo(f"❌ 源码目录不存在: {source_root}", err=True)
+        sys.exit(1)
+
+    if fmt == 'json':
+        content = json.dumps(result, ensure_ascii=False, indent=2)
+    else:
+        lines = [
+            f"# Spring 接口扫描\n",
+            f"- 接口总数: **{result['total']}**",
+            f"- 控制器数: {result['controllers']}",
+            f"- 源码根: `{result['source_root']}`\n",
+            "| 方法 | 路径 | 控制器.handler |",
+            "|------|------|----------------|",
+        ]
+        for a in result['apis']:
+            lines.append(f"| {a['method']} | `{a['path']}` | {a['class']}.{a['handler']} |")
+        content = '\n'.join(lines)
+
+    if output_path:
+        from ..core.paths import validate_output_path
+        pv = validate_output_path(output_path)
+        if not pv['ok']:
+            click.echo(f"⚠️ 产物路径越界: {pv['reason']}", err=True)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content, encoding='utf-8')
+        click.echo(f"✅ 接口清单已写入: {output_path}（{result['total']} 个接口）")
+    else:
+        click.echo(content)
+
+
 @cli.command(name='scaffold')
 @click.option('--case', 'case_id', required=True, help='用例 ID')
 def scaffold(case_id):

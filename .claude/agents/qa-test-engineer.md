@@ -411,6 +411,21 @@ python -m qa_agent.webui.analyzer.analyze \
 | **分页/过滤** | 首页、末页、超范围、排序、组合过滤 | 边界 |
 | **并发写入** | 同一资源并发更新、乐观锁冲突处理 | 竞态 |
 
+**Spring MVC 项目：先扫接口清单（推荐，避免"猜接口"）** ⭐
+
+设计 API 用例前，先用静态扫描提取真实接口清单（源码模式，无需编译）：
+```bash
+python -m qa_agent.cli.main scan-api \
+  --source-root src/main/java \
+  --output qa/run/api_definition.json
+```
+产出 `api_definition.json`（`{'apis': [{method, path, class, handler}]}`），用它：
+1. **设计用例**：对照真实接口清单逐个覆盖，不靠读源码"猜"有哪些接口
+2. **算应测接口数**：执行器 enhanced_execute_with_auth 直接读它算接口覆盖率
+   （之前这个文件没人生成，覆盖率算不准）
+
+非 Spring 项目跳过；源码模式不解析外部依赖类型的请求体/响应体字段。
+
 #### Mobile（Android/iOS/Flutter/RN）
 
 | 维度 | 必测场景 | 用例类型 |
