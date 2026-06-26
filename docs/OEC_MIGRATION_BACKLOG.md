@@ -88,7 +88,9 @@
   `qa_agent/webui/analyzer/`，再把 frontend_knowledge.json 喂给 e2e_enhancer。
 - **配套**：`uitest-source-fetcher`（git clone 前端仓库）可一并轻量移植作前置。
 
-### W2. 需求预审（执行前 6 维度门禁）★P2 中价值
+### W2. 需求预审（执行前 6 维度门禁）★P2 中价值 ✅ 已完成
+- **实现**：qa.md 新增"步骤 2.5 需求预审门禁"（6 维度：目标对象/关键操作/完成标志/
+  数据字段/异常场景/环境信息，分 充分/轻微缺失补全/严重缺失暂停追问）。
 - **oec 怎么做**：`web-uitest-requirement-reviewer` R 模式 6 维度（目标页面/关键操作/完成标志/
   数据字段/异常场景/环境信息），分 ✅充分/⚠️轻微缺失自动扩写/❌严重缺失暂停补充。
 - **TestAgent 现状**：无。Gatekeeper 是**执行后**判定，没有**执行前**的需求质量门禁。
