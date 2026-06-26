@@ -519,6 +519,48 @@ def parse_req(file_path, mode, content_only):
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@cli.command(name='report')
+@click.option('--format', 'fmt', type=click.Choice(['markdown', 'json', 'html']),
+              default='markdown', help='报告格式（默认 markdown）')
+@click.option('--output', 'output_path', default=None,
+              help='输出文件路径（不指定则打印到 stdout）')
+def report(fmt, output_path):
+    """
+    [Subagent 用] 从 last.json + history.jsonl 生成结构化测试报告
+
+    所有数字确定性计算（防 LLM 拍脑袋），支持历史趋势对比。
+
+    示例：
+      qa report                          # markdown 到 stdout
+      qa report --format html --output qa/reports/run.html
+      qa report --format json            # 机器可读元数据(供 CI)
+    """
+    from ..core.state_manager import StateManager
+    from ..core.report_generator import generate_report
+
+    sm = StateManager()
+    last_run = sm.load_last_run()
+    if not last_run:
+        click.echo("❌ 未找到 last.json，请先执行 /qa feature/module/release", err=True)
+        sys.exit(1)
+
+    history = sm.load_history(limit=50)
+    content = generate_report(last_run, history, fmt=fmt)
+
+    if output_path:
+        # 产物路径约束校验
+        from ..core.paths import validate_output_path
+        pv = validate_output_path(output_path)
+        if not pv['ok']:
+            click.echo(f"⚠️ 产物路径越界: {pv['reason']}", err=True)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content, encoding='utf-8')
+        click.echo(f"✅ 报告已写入: {output_path}")
+    else:
+        click.echo(content)
+
+
 @cli.command(name='scaffold')
 @click.option('--case', 'case_id', required=True, help='用例 ID')
 def scaffold(case_id):
