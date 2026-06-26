@@ -252,6 +252,15 @@ Task(
   - <根据 verdict 给出建议>
 ```
 
+**可选：生成结构化报告**（HTML/JSON + 历史趋势对比）：
+```bash
+# 数字确定性计算(防 LLM 拍脑袋)，支持对比上次执行的通过率趋势
+python -m qa_agent.cli.main report --format markdown          # 人读
+python -m qa_agent.cli.main report --format html --output qa/reports/<run_id>.html
+python -m qa_agent.cli.main report --format json              # 供 CI 解析
+```
+用户要详细报告或需要看趋势时用此命令，比手动拼装统计更准。
+
 #### ⚠️ 模式适配性提示（防"拿 L1 当主流程门禁"）
 
 **背景**：StudySkill 事故——用户跑 L1 PASS 后真实使用立刻撞到主流程断链（LLM 分析结果没传到概念预热）。L1 是单功能级，本就不验证跨"创建→分析→预热"的端到端数据流，PASS 不代表主流程没断。
@@ -345,6 +354,14 @@ else:
         - 集成/E2E：完整用户操作流程（2-3 条）
      d) 确保需求追踪矩阵 100% 覆盖
      e) **生成覆盖矩阵**（模块 × 维度，输出到 qa/coverage_matrix.md）
+     e2) **（可选）代码覆盖率 Gap 分析**：项目能产出 JaCoCo XML 时（如 Android `./gradlew jacocoTestReport`），用覆盖率缺口驱动补用例：
+        ```bash
+        # 解析 JaCoCo + 按类型分类未覆盖代码(主流程/边界/异常/防御性)
+        python -m qa_agent.cli.main coverage \
+          --jacoco-xml app/build/reports/jacoco/.../jacocoTestReport.xml \
+          --source-root app/src/main/kotlin --gap-report
+        ```
+        优先为 🔴 主流程未覆盖 和 🟠 边界未覆盖 补用例（防御性代码可低优先）。
      f) **执行完成后建立基线**：
         ```python
         from qa_agent.core.state_manager import StateManager
