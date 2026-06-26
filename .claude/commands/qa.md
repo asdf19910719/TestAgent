@@ -59,9 +59,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 
 1. 检查 `.qa-agent.yml` 是否存在
    - 不存在 → 提示用户 `/qa init`
-2. 检查 GitNexus MCP 是否可用（`mcp__gitnexus__detect_changes`）
-   - 不可用 + 配置 `impact_analysis: gitnexus` → 询问用户：
-     a) 等待修复（默认）
+2. 检查 CodeGraph 是否可用（`codegraph status` 或 `mcp__codegraph__codegraph_explore`）
+   - 不可用 + 配置 `impact_analysis: codegraph` → 询问用户：
+     a) 等待修复（默认，如先跑 `codegraph init` 建索引）
      b) 切换到 `impact_analysis: local`
      c) 取消运行
 
@@ -86,6 +86,17 @@ python -m qa_agent.cli.main prepare --mode <L?> --scope <scope> \
 python -m qa_agent.cli.main discover-docs --path "doc/v2026-06-17-当前版本文档/"
 # 返回分类后的文档清单 JSON
 ```
+
+**解析二进制需求文档**（PDF / DOCX / DOC，普通 Read 读不了）：
+```bash
+# 把 PDF/DOCX 转成纯文本(图片位置用 [图片N] 占位符)
+python -m qa_agent.cli.main parse-req --file "docs/PRD.pdf" --content-only
+# 完整 JSON(含图片磁盘路径,供按需 Read 分析图片):
+python -m qa_agent.cli.main parse-req --file "需求.docx"
+```
+⚠️ 当 `docs.primary`/`all_docs` 里出现 `.pdf`/`.docx`/`.doc` 文件时，
+**不要直接 Read**（会乱码），必须先用 `parse-req` 转成文本再读。
+依赖按需安装：`pip install python-docx mammoth markdownify pdfplumber PyMuPDF`
 
 输出 JSON 包含分类结果：
 ```json
@@ -121,7 +132,7 @@ spec-kit 这类框架会把设计拆在 `plan.md`/`data-model.md`/`research.md` 
 将以 L1 模式执行
 设计阶段: 增量补该功能用例
 执行阶段: 选中 N 条用例（P0=a, P1=b, P2=c）
-影响面来源: GitNexus / local
+影响面来源: CodeGraph / local
 非功能测试: 跳过 / 启用
 单次上限: X 条
 是否继续？(yes / 修改 / 取消)

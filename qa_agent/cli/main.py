@@ -63,7 +63,7 @@ def init(project_type, generic):
 
 @cli.command()
 @click.argument('scope')
-@click.option('--impact', type=click.Choice(['gitnexus', 'local']), help='影响面模式')
+@click.option('--impact', type=click.Choice(['codegraph', 'local']), help='影响面模式')
 def feature(scope, impact):
     """
     L1 Feature 模式：一个功能开发完
@@ -73,7 +73,7 @@ def feature(scope, impact):
 
 @cli.command()
 @click.argument('scope')
-@click.option('--impact', type=click.Choice(['gitnexus', 'local']), help='影响面模式')
+@click.option('--impact', type=click.Choice(['codegraph', 'local']), help='影响面模式')
 def module(scope, impact):
     """
     L2 Module 模式：模块/迭代完成
@@ -343,7 +343,7 @@ def resume():
 @cli.command(name='prepare')
 @click.option('--mode', required=True, type=click.Choice(['L0', 'L1', 'L2', 'L3', 'L4']))
 @click.option('--scope', required=True)
-@click.option('--impact', type=click.Choice(['gitnexus', 'local']), default=None)
+@click.option('--impact', type=click.Choice(['codegraph', 'local']), default=None)
 @click.option('--docs-path', multiple=True, help='用户动态指定文档目录（可多次）')
 def prepare(mode, scope, impact, docs_path):
     """
@@ -471,6 +471,52 @@ def discover_docs(path):
 
     result = discover_from_directory(path)
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@cli.command(name='parse-req')
+@click.option('--file', 'file_path', required=True,
+              help='需求文档路径（PDF / DOCX / DOC / TXT / MD）')
+@click.option('--mode', type=click.Choice(['fast', 'precise', 'auto']),
+              default='auto', help='DOCX 解析模式（默认 auto）')
+@click.option('--content-only', is_flag=True,
+              help='只输出纯文本内容（不含 JSON 元数据），便于直接喂给 Designer')
+def parse_req(file_path, mode, content_only):
+    """
+    [Subagent 用] 解析需求文档为结构化文本（PDF/DOCX/TXT/MD + 图片提取）
+
+    把二进制需求文档转成 Designer 可读的纯文本，图片位置用 [图片N] 占位符，
+    并返回图片磁盘路径供按需 Read 分析。
+
+    示例：
+      qa parse-req --file docs/PRD.pdf
+      qa parse-req --file 需求.docx --content-only
+
+    依赖（按格式按需安装）：
+      pip install python-docx mammoth markdownify pdfplumber PyMuPDF
+    """
+    from ..core.requirement_parser import RequirementParser
+
+    try:
+        parser = RequirementParser()
+        result = parser.parse(file_path=file_path, mode=mode)
+    except FileNotFoundError as e:
+        click.echo(f"❌ 文件不存在: {file_path}", err=True)
+        sys.exit(1)
+    except ImportError as e:
+        click.echo(
+            f"❌ 缺少解析依赖: {e}\n"
+            f"   请安装: pip install python-docx mammoth markdownify pdfplumber PyMuPDF",
+            err=True
+        )
+        sys.exit(2)
+    except Exception as e:
+        click.echo(f"❌ 解析失败: {e}", err=True)
+        sys.exit(3)
+
+    if content_only:
+        click.echo(result['content'])
+    else:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @cli.command(name='scaffold')
