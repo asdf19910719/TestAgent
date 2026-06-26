@@ -426,6 +426,27 @@ python -m qa_agent.cli.main scan-api \
 
 非 Spring 项目跳过；源码模式不解析外部依赖类型的请求体/响应体字段。
 
+**接口定义增强：调用链 + SQL + testPoints（A2，深化用例断言质量）** ⭐
+
+`scan-api` 给出接口骨架（method/path/handler）后，对**核心接口**（增删改、
+涉及数据一致性的）用 CodeGraph 追调用链，提取 SQL 和测试点，让断言有据可依：
+
+1. **追调用链**（Controller → Service → Dao/Mapper）：
+   ```bash
+   codegraph callees <ControllerClass>.<handler>   # 该接口调了谁
+   codegraph callees <ServiceClass>.<method>        # 逐层下钻到 Dao
+   ```
+2. **提取 SQL**：读 Dao 方法对应的 Mapper XML（`<select>/<insert>/<update>/
+   <delete>`）或注解（`@Select/@Insert` 等），拿到真实 SQL。
+3. **分析参数映射**：SQL 的 WHERE 字段哪些需接口参数提供（注意变量重命名，
+   如 `userId` 传入后赋给 `uid`，要追踪映射）。
+4. **提炼 testPoints**：基于 SQL + 业务逻辑提炼"该接口必须验证什么"，写进用例
+   `assertions`。例如有 `WHERE status=? AND owner_id=?` → 必测"越权访问他人数据被拒"。
+
+把每个核心接口的 `{调用链, sql, 参数映射, testPoints}` 记到用例 notes 或
+`qa/run/api_definition.json` 对应条目，作为断言依据——这是把"猜断言"升级为
+"基于真实 SQL/调用链设计断言"的关键。非核心接口（纯查询/无副作用）可只做骨架。
+
 #### Mobile（Android/iOS/Flutter/RN）
 
 | 维度 | 必测场景 | 用例类型 |
