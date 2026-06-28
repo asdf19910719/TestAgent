@@ -292,6 +292,7 @@ class StateManager:
         - coverage_matrix: {module: [dimension1, dimension2, ...]}
         - target_coverage: 预期覆盖标准
         - completeness: 'partial' | 'full'（L3 完成为 full）
+        - docs_hash: {doc_path: hash}（用于内容维度判断）
         - history: [{run_id, mode, total_cases, timestamp}, ...]
         """
         # 合并已有基线（保留 established_at 和 history）
@@ -369,25 +370,160 @@ class StateManager:
         with open(self.baseline_path, 'r', encoding='utf-8') as f:
             return json.load(f)
 
-    def needs_baseline_refresh(self) -> bool:
+    def needs_baseline_refresh(self, docs_paths: List[str] = None, sample_check: bool = False) -> bool:
         """
-        判断是否需要刷新基线
+        判断是否需要刷新基线（三层判定）
 
-        触发条件：
-        - 基线不存在
-        - 基线建立时间超过 30 天
-        - 需求文档有重大更新（通过 git diff 判断）
+        三层维度（任一触发即刷新）：
+        1. 时间维度：基线建立时间超过 30 天
+        2. 内容维度：需求文档有重大更新（通过 git diff 判断）
+        3. 质量维度：基线测试代码抽样验证失败
+
+        Args:
+            docs_paths: 需求文档路径列表（用于 git diff 检查）
+            sample_check: 是否执行质量抽样验证（默认跳过，由调用方显式启用）
+
+        Returns:
+            True 表示需要刷新基线
         """
         baseline = self.load_baseline()
         if not baseline:
+            print("[Baseline] 基线不存在，需要建立")
             return True
 
-        # 检查时效性（30 天）
+        # 第一层：时间维度（30 天）
         established = datetime.fromisoformat(baseline['established_at'])
-        if datetime.now() - established > timedelta(days=30):
+        days_old = (datetime.now() - established).days
+        if days_old > 30:
+            print(f"[Baseline] 时间维度触发：基线已建立 {days_old} 天（超过 30 天）")
             return True
+
+        # 第二层：内容维度（需求文档变更）
+        if docs_paths:
+            docs_changed = self._check_docs_change(docs_paths, baseline)
+            if docs_changed:
+                print("[Baseline] 内容维度触发：需求文档有重大变更")
+                return True
+
+        # 第三层：质量维度（测试代码抽样验证）
+        if sample_check:
+            quality_ok = self._sample_baseline_quality(baseline)
+            if not quality_ok:
+                print("[Baseline] 质量维度触发：基线测试代码抽样验证失败")
+                return True
 
         return False
+
+    def _check_docs_change(self, docs_paths: List[str], baseline: Dict[str, Any]) -> bool:
+        """
+        检查需求文档是否有重大变更（内容维度）
+
+        双判据（任一命中即视为变更）：
+        1. 内容 hash 变化（主判据，可靠，不依赖 git 状态）
+        2. git log 检测到 commit（辅助，用于老基线无 docs_hash 的兜底）
+
+        Args:
+            docs_paths: 需求文档路径列表
+            baseline: 当前基线
+
+        Returns:
+            True 表示有重大变更
+        """
+        import subprocess
+
+        baseline_docs_hash = baseline.get('docs_hash', {}) or {}
+        has_hash_record = bool(baseline_docs_hash)
+
+        for doc_path in docs_paths:
+            path = Path(doc_path)
+            if not path.exists():
+                continue
+
+            # 判据 1：内容 hash 变化（总是检查，可靠）
+            if has_hash_record:
+                baseline_hash = baseline_docs_hash.get(str(path))
+                current_hash = self._compute_file_hash(path)
+                # 基线记录过该文档，且当前 hash 不匹配 → 变更
+                if baseline_hash is not None and current_hash and baseline_hash != current_hash:
+                    print(f"[Baseline] 内容维度：{path.name} hash 变化 "
+                          f"({baseline_hash[:8]} → {current_hash[:8]})")
+                    return True
+                # 该文档 hash 匹配，检查下一个
+                if baseline_hash is not None:
+                    continue
+
+            # 判据 2：git log（仅当基线无 hash 记录，或该文档未被记录时作兜底）
+            established_at = baseline.get('established_at', '')
+            if not established_at:
+                return True  # 无时间戳，保守刷新
+
+            try:
+                result = subprocess.run(
+                    ['git', 'log', '--oneline', '--after', established_at[:10], '--', str(path)],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(path.parent),
+                    timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    commits = result.stdout.strip().split('\n')
+                    print(f"[Baseline] 内容维度：{path.name} 有 {len(commits)} 个提交")
+                    return True
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+                pass  # git 不可用，且无 hash 记录 → 无法判定，不触发
+
+        return False
+
+    def _sample_baseline_quality(self, baseline: Dict[str, Any]) -> bool:
+        """
+        基线质量抽样验证（质量维度，治本维度）
+
+        两个信号，任一不达标即判质量失效：
+        1. baseline 记录的上次 pass_rate < 70%
+        2. last.json 上次 gatekeeper 判定为 FAIL（覆盖「高通过率但 P0 失败」的 FAIL 场景）
+
+        设计意图：即使时间没到、需求没变，只要上次执行结果差（spec 过时、
+        代码漂移导致大面积失败），就强制刷新。这是只看时间无法发现的。
+
+        Args:
+            baseline: 当前基线
+
+        Returns:
+            True 表示质量通过，False 表示需要刷新
+        """
+        import re
+
+        # 信号 1：上次通过率
+        last_pass_rate = baseline.get('pass_rate', '')
+        if last_pass_rate:
+            match = re.search(r'\((\d+)%\)', last_pass_rate)
+            if match:
+                rate = int(match.group(1))
+                if rate < 70:
+                    print(f"[Baseline] 质量维度：上次通过率 {rate}% < 70%，需要刷新")
+                    return False
+
+        # 信号 2：上次 gatekeeper 判定为 FAIL（覆盖高通过率但 P0 失败的场景）
+        last_run = self.load_last_run()
+        if last_run:
+            verdict_obj = last_run.get('gatekeeper_verdict') or {}
+            verdict = verdict_obj.get('verdict', '')
+            if verdict == 'FAIL':
+                print("[Baseline] 质量维度：上次 gatekeeper 判定 FAIL，需要刷新")
+                return False
+
+        return True
+
+    def _compute_file_hash(self, file_path: Path) -> Optional[str]:
+        """计算文件内容的 hash"""
+        if not file_path.exists():
+            return None
+
+        try:
+            content = file_path.read_text(encoding='utf-8')
+            return hashlib.sha256(content.encode()).hexdigest()[:16]
+        except Exception:
+            return None
 
     def finalize_after_manual_repair(
         self,

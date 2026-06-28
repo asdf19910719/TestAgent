@@ -352,7 +352,34 @@ python -m qa_agent.cli.main resolve-bugfix --ref "$ref"
 
 L3 是发版门，**必须覆盖项目全部功能的全部路径**（正常 + 异常 + 边界 + 状态转换）。
 
-**执行前先检查基线**：
+**执行前先检查基线（三层判定）**：
+
+基线刷新与否**绝不只看时间**，必须按三层维度判定，任一触发即刷新：
+
+```bash
+python -c "
+from qa_agent.core.state_manager import StateManager
+sm = StateManager()
+# 从 prepare 输出（docs.all_docs）拿到需求文档路径列表
+docs_paths = [...]  # 本次 prepare 发现的全部需求文档路径
+needs_refresh = sm.needs_baseline_refresh(
+    docs_paths=docs_paths,      # 第二层：内容维度（需求文档 git diff）
+    sample_check=True           # 第三层：质量维度（基线测试代码抽样）
+)
+print('需要刷新基线' if needs_refresh else '基线有效')
+"
+```
+
+| 层级 | 判定依据 | 触发条件 | 设计意图 |
+|---|---|---|---|
+| **① 时间** | `baseline.established_at` | 基线 > 30 天 | 防长期不刷新 |
+| **② 内容** | 需求文档 git log / 内容 hash | 基线建立后需求文档有 commit，或 hash 变化 | 防需求漂移 |
+| **③ 质量** | 上次 pass_rate / verdict | pass_rate < 70% 或上次 FAIL | 防测试代码过时（治本） |
+
+⚠️ **第三层是治本维度**：即使时间没到、需求没变，但被测代码变了导致 spec 过时
+（如本次事故的 22 个解构 bug + harness T061），第三层会通过"上次执行失败率高"
+捕获到，强制刷新。这是只看时间无法发现的。
+
 ```bash
 python -c "
 from qa_agent.core.state_manager import StateManager
@@ -409,12 +436,12 @@ else:
    **参考基准**：`用例总数 ≈ 模块数 × 平均每模块 12-15 条`
 
 2. **用例库已有足够用例时**：
-   - **先检查基线是否需要刷新**（30 天/需求重大变更）
-   - 如果基线仍有效：
+   - **按上述三层判定决定是否刷新**（时间/内容/质量，不是只看 30 天）
+   - 如果三层都通过（基线有效）：
      a) 对照基线的覆盖矩阵，只补充缺失的维度
      b) 不重新生成已有用例
      c) 执行全部用例（不限数量）
-   - 如果需要刷新基线：
+   - 如果任一层触发（需要刷新基线）：
      a) 重新扫描需求文档和源码结构
      b) 补充新增功能模块的用例
      c) 更新覆盖矩阵
