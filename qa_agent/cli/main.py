@@ -40,6 +40,101 @@ def cli():
     pass
 
 
+@cli.command()
+@click.option('--output', default='qa/run/selfcheck_report.md', help='报告输出路径')
+def selfcheck(output):
+    """
+    Gatekeeper 自检：检查 YAML 一致性、测试覆盖、主流程清单
+
+    执行 L3 前建议先运行此命令，确保用例库质量
+    """
+    from ..core.gatekeeper_selfcheck import run_full_selfcheck, generate_selfcheck_report
+    from pathlib import Path
+
+    click.echo("[QA Agent] 执行 Gatekeeper 自检...")
+
+    result = run_full_selfcheck(Path('.'))
+
+    # 输出摘要
+    click.echo(f"\n{result['summary']}\n")
+
+    if result.get('issues'):
+        click.echo("发现的问题:")
+        for issue in result['issues']:
+            click.echo(f"  - {issue}")
+
+    # 生成报告
+    report_path = generate_selfcheck_report(result, Path(output))
+    click.echo(f"\n详细报告已保存: {report_path}")
+
+    # 根据状态返回退出码
+    if result['status'] == 'BLOCKED':
+        click.secho("\n❌ 自检失败，建议先修复问题再执行 L3", fg='red')
+        import sys
+        sys.exit(1)
+    elif result['status'] == 'WARN':
+        click.secho("\n⚠️  发现潜在问题，建议修复", fg='yellow')
+    else:
+        click.secho("\n✅ 自检通过", fg='green')
+
+
+@cli.command()
+@click.argument('case_ids', nargs=-1)
+@click.option('--test-type', default='web', help='测试类型 (web/cli/api/mobile)')
+def check_evidence(case_ids, test_type):
+    """
+    检查 E2E 测试的执行证据
+
+    用法:
+      qa check-evidence TC-E2E-001 TC-E2E-002
+      qa check-evidence --test-type cli TC-CLI-001
+      qa check-evidence  # 检查所有 E2E 用例
+    """
+    from ..core.e2e_evidence import check_e2e_execution_evidence, check_all_e2e_cases
+    from pathlib import Path
+
+    if not case_ids:
+        # 检查所有用例
+        click.echo("[QA Agent] 检查所有 E2E 用例的执行证据...")
+        result = check_all_e2e_cases(Path('.'))
+
+        click.echo(f"\nE2E 用例总数: {result['total']}")
+        click.echo(f"有证据: {result['with_evidence']}")
+        click.echo(f"无证据: {result['without_evidence']}")
+
+        if result['cases_without_evidence']:
+            click.echo("\n无证据的用例:")
+            for case in result['cases_without_evidence']:
+                click.echo(f"  - {case['case_id']}: {case['reason']}")
+
+            click.secho(f"\n❌ {result['without_evidence']} 个用例缺少执行证据", fg='red')
+            import sys
+            sys.exit(1)
+        else:
+            click.secho("\n✅ 所有 E2E 用例都有执行证据", fg='green')
+    else:
+        # 检查指定用例
+        click.echo(f"[QA Agent] 检查 {len(case_ids)} 个用例的执行证据...")
+
+        all_ok = True
+        for case_id in case_ids:
+            has_evidence, details = check_e2e_execution_evidence(
+                case_id,
+                Path('.'),
+                test_type
+            )
+
+            if has_evidence:
+                click.secho(f"✅ {case_id}: {details}", fg='green')
+            else:
+                click.secho(f"❌ {case_id}: {details}", fg='red')
+                all_ok = False
+
+        if not all_ok:
+            import sys
+            sys.exit(1)
+
+
 # ============== 用户面向命令 ==============
 
 @cli.command()

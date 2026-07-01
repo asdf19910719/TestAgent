@@ -26,6 +26,51 @@ BROWSER_INDICATORS = [
     'page.evaluate',
 ]
 
+# CLI 执行证据关键词
+CLI_INDICATORS = [
+    'subprocess.run',
+    'exec(',
+    'spawn(',
+    'ChildProcess',
+    'stdout:',
+    'stderr:',
+    'exit code:',
+    'Command executed:',
+]
+
+# API 测试证据关键词
+API_INDICATORS = [
+    'HTTP/1.1',
+    'HTTP/2',
+    'status: 200',
+    'status: 201',
+    'status: 400',
+    'status: 401',
+    'status: 403',
+    'status: 404',
+    'status: 500',
+    'request:',
+    'response:',
+    'axios.',
+    'fetch(',
+    'got(',
+    'supertest',
+]
+
+# Mobile 测试证据关键词
+MOBILE_INDICATORS = [
+    'ActivityScenario',
+    'launchActivity',
+    'onView(',
+    'perform(',
+    'check(',
+    'matches(',
+    'Espresso',
+    'UiAutomator',
+    'XCUITest',
+    'Appium',
+]
+
 # 静态检查特征（不算真正的 E2E）
 STATIC_CHECK_INDICATORS = [
     'fs.existsSync',
@@ -38,7 +83,8 @@ STATIC_CHECK_INDICATORS = [
 
 def check_e2e_execution_evidence(
     case_id: str,
-    workspace: Path = Path('.')
+    workspace: Path = Path('.'),
+    test_type: str = 'web'
 ) -> Tuple[bool, str]:
     """
     检查 E2E 用例是否有真实执行证据
@@ -46,6 +92,7 @@ def check_e2e_execution_evidence(
     Args:
         case_id: 用例 ID
         workspace: 工作目录
+        test_type: 测试类型 (web/cli/api/mobile)
 
     Returns:
         (has_evidence: bool, details: str)
@@ -60,14 +107,32 @@ def check_e2e_execution_evidence(
         try:
             log_content = log_file.read_text(encoding='utf-8', errors='ignore')
 
-            # 检查浏览器操作证据
-            browser_found = []
-            for indicator in BROWSER_INDICATORS:
-                if indicator in log_content:
-                    browser_found.append(indicator)
+            # 根据测试类型选择证据关键词
+            if test_type == 'web':
+                indicators = BROWSER_INDICATORS
+                indicator_name = '浏览器操作'
+            elif test_type == 'cli':
+                indicators = CLI_INDICATORS
+                indicator_name = 'CLI 执行'
+            elif test_type == 'api':
+                indicators = API_INDICATORS
+                indicator_name = 'API 请求'
+            elif test_type == 'mobile':
+                indicators = MOBILE_INDICATORS
+                indicator_name = 'Mobile 操作'
+            else:
+                # 默认：尝试所有类型
+                indicators = BROWSER_INDICATORS + CLI_INDICATORS + API_INDICATORS + MOBILE_INDICATORS
+                indicator_name = '测试执行'
 
-            if browser_found:
-                evidence_items.append(f"日志包含浏览器操作: {', '.join(browser_found[:3])}")
+            # 检查执行证据
+            found = []
+            for indicator in indicators:
+                if indicator in log_content:
+                    found.append(indicator)
+
+            if found:
+                evidence_items.append(f"日志包含{indicator_name}: {', '.join(found[:3])}")
             else:
                 # 检查是否是静态检查
                 static_found = []
@@ -78,7 +143,7 @@ def check_e2e_execution_evidence(
                 if static_found:
                     return False, f"日志仅包含静态检查: {', '.join(static_found[:3])}（不是真正的 E2E）"
                 else:
-                    return False, "日志无浏览器操作证据"
+                    return False, f"日志无{indicator_name}证据"
 
         except Exception as e:
             return False, f"日志读取失败: {e}"
@@ -109,10 +174,31 @@ def check_e2e_execution_evidence(
         if traces:
             evidence_items.append(f"Playwright trace: {len(traces)} 个")
 
+    # 5. 检查 API 响应文件（JSON）
+    api_responses_dir = run_dir / 'api_responses'
+    if api_responses_dir.exists():
+        responses = list(api_responses_dir.glob(f"{case_id}*.json"))
+        if responses:
+            evidence_items.append(f"API 响应: {len(responses)} 个")
+
+    # 6. 检查 HAR 文件（网络请求记录）
+    har_dir = run_dir / 'har'
+    if har_dir.exists():
+        hars = list(har_dir.glob(f"{case_id}*.har"))
+        if hars:
+            evidence_items.append(f"HAR 文件: {len(hars)} 个")
+
+    # 7. 检查 logcat（Mobile）
+    logcat_dir = run_dir / 'logcat'
+    if logcat_dir.exists():
+        logcats = list(logcat_dir.glob(f"{case_id}*.txt"))
+        if logcats:
+            evidence_items.append(f"Logcat: {len(logcats)} 个")
+
     if evidence_items:
         return True, " | ".join(evidence_items)
     else:
-        return False, "无任何 E2E 执行证据（无日志/截图/视频/trace）"
+        return False, "无任何 E2E 执行证据（无日志/截图/视频/trace/响应文件）"
 
 
 def check_all_e2e_cases(

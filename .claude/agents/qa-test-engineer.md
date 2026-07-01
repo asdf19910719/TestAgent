@@ -694,6 +694,147 @@ stats = compute_coverage_stats(tests)
 
 **所有模式（L0 除外）下，Runner 必须主动启动环境并执行 E2E 测试，不得仅标记 BLOCKED 退出。**
 
+### 执行证据强制保存（防止"假 E2E"）⭐
+
+**背景**：StudySkill L3 事件中，AI 把 `body.includes('阅读')` 标记为 E2E PASS，实际未启动浏览器。
+
+**强制要求**：每个 E2E 测试执行时，必须保存以下至少一种证据：
+
+| 测试类型 | 必需证据 | 保存位置 | 检查方式 |
+|---------|---------|---------|---------|
+| **Web E2E** | 浏览器操作日志 + 截图/视频/trace（任选一） | `qa/run/<case_id>.log` + `qa/run/screenshots/` | 日志含 `Browser launched` / `page.click` |
+| **CLI E2E** | 进程执行日志 + stdout/stderr | `qa/run/<case_id>.log` | 日志含 `subprocess.run` / `exit code:` |
+| **API E2E** | HTTP 请求/响应 | `qa/run/<case_id>.log` + `qa/run/api_responses/<case_id>.json` | 日志含 `status: 200` / `request:` |
+| **Mobile E2E** | Activity 操作日志 + logcat | `qa/run/<case_id>.log` + `qa/run/logcat/<case_id>.txt` | 日志含 `launchActivity` / `onView(` |
+
+#### 具体实现步骤
+
+**Web E2E 示例（Playwright）**：
+```typescript
+// tests/e2e/login.spec.ts
+test('用户登录', async ({ page }, testInfo) => {
+  // 1. 启动浏览器并记录日志
+  console.log('[E2E] Browser launched');
+  
+  // 2. 执行操作
+  await page.goto('https://app.example.com/login');
+  console.log('[E2E] page.goto: /login');
+  
+  await page.click('[data-testid="username"]');
+  await page.fill('[data-testid="username"]', 'alice');
+  console.log('[E2E] page.fill: username');
+  
+  // 3. 保存截图（关键步骤）
+  await page.screenshot({ 
+    path: `qa/run/screenshots/TC-LOGIN-001-step1.png` 
+  });
+  
+  await page.click('[data-testid="submit"]');
+  
+  // 4. 断言
+  await expect(page.locator('[data-testid="username-display"]'))
+    .toHaveText('alice');
+  
+  // 5. 保存最终截图
+  await page.screenshot({ 
+    path: `qa/run/screenshots/TC-LOGIN-001-final.png` 
+  });
+  
+  // 6. 保存 trace（可选，Playwright 自动）
+  // trace 保存到 qa/run/traces/TC-LOGIN-001.zip
+});
+```
+
+**CLI E2E 示例（Python）**：
+```python
+# tests/e2e/test_cli.py
+def test_status_command():
+    case_id = "TC-CLI-001"
+    log_file = Path(f"qa/run/{case_id}.log")
+    
+    # 1. 执行真实命令
+    result = subprocess.run(
+        ["python", "-m", "qa_agent.cli.main", "status"],
+        capture_output=True,
+        text=True
+    )
+    
+    # 2. 保存完整日志（stdout + stderr）
+    log_content = f"""[E2E] subprocess.run: qa_agent.cli.main status
+exit code: {result.returncode}
+
+=== stdout ===
+{result.stdout}
+
+=== stderr ===
+{result.stderr}
+"""
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text(log_content, encoding='utf-8')
+    
+    # 3. 断言
+    assert result.returncode == 0
+    assert "用例库" in result.stdout
+    assert "Open Bugs" in result.stdout
+```
+
+**API E2E 示例（REST）**：
+```typescript
+// tests/e2e/api.spec.ts
+test('创建订单 API', async () => {
+  const case_id = 'TC-API-001';
+  
+  // 1. 发送请求
+  const response = await fetch('https://api.example.com/orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: 123, quantity: 2 })
+  });
+  
+  // 2. 保存响应
+  const responseData = await response.json();
+  await fs.promises.writeFile(
+    `qa/run/api_responses/${case_id}.json`,
+    JSON.stringify({
+      request: { method: 'POST', url: '/orders', body: {...} },
+      response: { status: response.status, data: responseData }
+    }, null, 2)
+  );
+  
+  // 3. 保存日志
+  const log = `[E2E] HTTP/1.1 POST /orders
+status: ${response.status}
+request: {"product_id":123,"quantity":2}
+response: ${JSON.stringify(responseData)}
+`;
+  await fs.promises.writeFile(`qa/run/${case_id}.log`, log);
+  
+  // 4. 断言
+  expect(response.status).toBe(201);
+  expect(responseData.order_id).toBeDefined();
+});
+```
+
+#### 证据自检（执行后必做）
+
+**使用工具自动检查**：
+```python
+from qa_agent.core.e2e_evidence import check_all_e2e_cases
+
+# 执行完所有 E2E 后检查
+result = check_all_e2e_cases()
+
+if result['without_evidence'] > 0:
+    print(f"❌ {result['without_evidence']} 个 E2E 用例缺少执行证据")
+    for case in result['cases_without_evidence']:
+        print(f"  - {case['case_id']}: {case['reason']}")
+    # 这些用例不能标记为 PASS
+```
+
+**Gatekeeper 会检查**：
+- 如果标记为 E2E PASS 但无证据 → 判定 BLOCKED
+- 如果日志仅含 `fs.existsSync` / `.includes(` → 判定为静态检查，不算 E2E
+
 #### 自动检测启动命令（无需用户配置）
 
 **Runner 必须自行分析项目结构，确定如何启动服务。检测逻辑：**

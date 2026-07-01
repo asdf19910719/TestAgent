@@ -90,8 +90,9 @@ tools: Read, Write, Edit, Bash, Glob, Grep
     4. 存在 Playwright trace（`qa/run/traces/<case_id>.zip`）
   - **判定**：至少有一种证据 → 有效 E2E；全无 → 不是真正的 E2E
 
-#### 具体检查步骤：
+#### 具体检查步骤（使用工具）：
 
+**推荐方式（自动检查所有 E2E 用例）**：
 ```python
 # 使用 Python 工具检查
 from qa_agent.core.e2e_evidence import check_all_e2e_cases
@@ -114,8 +115,7 @@ if result['without_evidence'] > 0:
         print(f"  - {case['case_id']}: {case['reason']}")
 ```
 
-或者手动检查关键用例：
-
+**手动检查方式（单个用例）**：
 ```bash
 # 读取日志
 Read qa/run/TC-E2E-001.log
@@ -123,7 +123,17 @@ Read qa/run/TC-E2E-001.log
 # 检查关键词
 # ✅ 有效 E2E：包含 "Browser launched" / "page.goto" / "page.click"
 # ❌ 假 E2E：仅包含 "fs.existsSync" / ".includes("
+
+# 检查截图/视频
+ls qa/run/screenshots/TC-E2E-001*.png
+ls qa/run/videos/TC-E2E-001*.webm
 ```
+
+**支持的证据类型（按测试类型）**：
+- **Web E2E**: 浏览器操作日志 + 截图 + 视频 + Playwright trace + HAR 文件
+- **CLI E2E**: 进程执行日志 + stdout/stderr 输出
+- **API E2E**: HTTP 请求/响应日志 + JSON 响应文件
+- **Mobile E2E**: Activity 操作日志 + 截图 + logcat
 
 **判定规则**：
 - 如果 > 30% 的 E2E 用例无证据 → BLOCKED（"大量假 E2E，未真实验证用户行为"）
@@ -135,8 +145,31 @@ Read qa/run/TC-E2E-001.log
   - **背景**：StudySkill L2 运行选中 9 条，实际只跑通 1 条（8.3%），其余 11 条 YAML 标 `automation.status: implemented` 但根本没有可执行脚本 → 需求覆盖虚高到不可信
   - **根因**：Designer 虚标 `implemented`，selection 把它们当成可执行用例选进来，Runner 却跑不了
 
-#### 具体检查步骤：
+#### 具体检查步骤（使用自检工具）：
 
+**推荐方式（一键检查）**：
+```python
+from qa_agent.core.gatekeeper_selfcheck import run_full_selfcheck
+
+result = run_full_selfcheck()
+# result = {
+#   'status': 'PASS' | 'WARN' | 'BLOCKED',
+#   'yaml_consistency': {
+#     'inconsistent_count': 3,
+#     'inconsistent': [{'case_id': 'TC-001', 'message': '...'}]
+#   },
+#   'existing_tests_coverage': {...},
+#   'issues': ['YAML 一致性: 70% (3 个不一致)']
+# }
+
+if result['status'] == 'BLOCKED':
+    # 输出自检报告
+    from qa_agent.core.gatekeeper_selfcheck import generate_selfcheck_report
+    report_path = generate_selfcheck_report(result)
+    print(f"自检失败，报告已生成: {report_path}")
+```
+
+**手动检查方式**：
 1. 读取 `qa/run/last.json` 的 `selection.case_ids`（本次选中的用例）
 2. 读取 `execution`（实际执行结果）
 3. 计算执行率：`已执行数 / selection.total`
