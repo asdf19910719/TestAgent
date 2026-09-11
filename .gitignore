@@ -52,3 +52,7 @@ qa/.locks/
 
 # Logs
 *.log
+
+# 本地会话记录 / 代码索引（含跨项目内容，禁止入库）
+.shiftengine/
+.codegraph/
