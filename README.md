@@ -75,49 +75,65 @@ pip install -e .
 
 ## 快速开始
 
-### 插件安装（推荐）
+### 方式 1: Claude Code 插件安装（推荐用于 Claude Code）
 
-本项目是标准 Claude Code 插件。在任意机器的 Claude Code 里两条命令即可：
+在 Claude Code 里两条命令：
 
 ```
 /plugin marketplace add asdf19910719/TestAgent
 /plugin install testagent@testagent
 ```
 
-安装后补上 Python 核心依赖（工具层需要）：
+补上 Python 核心依赖：
 
 ```bash
 pip install pyyaml click
-# 可选（WebUI E2E / API executor 才需要）：
+# 可选（WebUI E2E / API executor）：
 pip install playwright requests
 ```
 
-然后重启 Claude Code，在任意项目里用 `/testagent:qa` 触发：
+重启 Claude Code，用 `/testagent:qa` 触发。插件自带版本管理，作者更新后用户 `/plugin update testagent` 即可获取。
 
-```
-/testagent:qa status                # 查看覆盖状态
-/testagent:qa feature 登录          # L1 功能级测试
-/testagent:qa release               # L3 发版门
-```
+### 方式 2: 传统项目级安装（Codex / zcode / 项目内使用）
 
-> 插件机制自带版本管理：作者 bump `plugin.json` 的 `version` 后，用户 `/plugin update testagent` 即可获取更新，无需手工复制文件。
+**本插件自适应多平台**——同一份代码在 Claude Code 插件、Codex、zcode 都能用。
 
-### 备选：源码目录直接使用
-
-克隆仓库后在本项目内开发或调试：
+克隆仓库或下载 ZIP：
 
 ```bash
 git clone https://github.com/asdf19910719/TestAgent.git
 cd TestAgent
-pip install -e .                    # 装工具层（含 CLI 命令 qa）
-claude --plugin-dir .               # 本地加载插件测试
+pip install -e .                    # 安装工具层
 ```
 
-首次在目标项目使用需初始化：
+**使用方式 A: 在 TestAgent 目录内直接用**
+
+Codex/zcode 打开 `TestAgent` 目录,用 `/qa`(读取 `.claude/` 下的文件)。
+
+**使用方式 B: 复制到目标项目**
 
 ```bash
-qa init   # 自动检测项目类型、框架、需求文档，生成 .qa-agent.yml
-# 可编辑 .qa-agent.yml 确认自动检测，特别是 codegraph.mcp_tool_prefixes
+cp -r .claude /path/to/your/project/
+cd /path/to/your/project
+qa init   # 生成 .qa-agent.yml
+```
+
+在目标项目里用 `/qa` 触发。
+
+### 技术说明（多平台兼容原理）
+
+插件内置**运行时自适应**:
+- **Claude Code 插件**: `${CLAUDE_PLUGIN_ROOT}` 被替换 → 用插件安装路径
+- **传统工具**(Codex/zcode): 占位符保持字面值 → 用相对路径 `.`
+- 无需维护两个版本,一份代码通吃
+
+目录结构同时支持两种加载方式:
+```
+TestAgent/
+├── .claude/           # 传统工具读这里(agents/commands 副本)
+├── agents/            # 插件机制读这里
+├── commands/
+└── qa_agent/          # Python 工具层(PYTHONPATH 自适应指向)
 ```
 
 ### 接入项目
