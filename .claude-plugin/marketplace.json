@@ -1,0 +1,21 @@
+{
+  "name": "testagent",
+  "owner": {
+    "name": "asdf19910719",
+    "url": "https://github.com/asdf19910719/TestAgent"
+  },
+  "description": "AI Test Engineer Agent — 五档分级测试与发版质量门（Claude Code 扩展）",
+  "plugins": [
+    {
+      "name": "testagent",
+      "source": ".",
+      "description": "五档分级测试（L0-L4）：Designer+Runner 设计并执行测试，Gatekeeper 独立上下文判定，防确认偏差。L3 为唯一发版凭据。",
+      "version": "3.0.0",
+      "license": "MIT",
+      "homepage": "https://github.com/asdf19910719/TestAgent",
+      "repository": "https://github.com/asdf19910719/TestAgent",
+      "keywords": ["testing", "qa", "e2e", "playwright", "pytest", "quality-gate"],
+      "category": "testing"
+    }
+  ]
+}

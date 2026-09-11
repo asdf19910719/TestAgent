@@ -15,6 +15,34 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 - 你（Claude Code）：完成 LLM 推理工作（设计用例、生成脚本、判定结论）
 - Subagent 协作：Designer+Runner 与 Gatekeeper 通过文件交接（防确认偏差）
 
+## ⚙️ Python 工具层调用约定（必读）
+
+本插件的 Python 工具层（`qa_agent/` 包）位于插件根目录。调用前必须设置 `PYTHONPATH` 让 Python 找到该模块。
+
+**标准调用模式**（下文所有 `python -m qa_agent.cli.main` 调用都遵循此模式）：
+```bash
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
+```
+
+**`${CLAUDE_PLUGIN_ROOT}` 说明**：
+- Claude Code 加载插件时自动替换为插件实际安装目录（如 `~/.claude/plugins/.../testagent`）
+- 如果该占位符未被替换（非插件方式运行，如源码目录），使用当前工作目录的父目录或 `.` 作为回退
+
+**首次运行检查**（依赖 `pyyaml` 和 `click`，其他依赖按需）：
+```bash
+python -c "import yaml, click" 2>/dev/null || {
+  echo "⚠️  缺少 Python 依赖，请先安装："
+  echo "    pip install pyyaml click"
+  echo ""
+  echo "可选依赖（WebUI E2E 需要）："
+  echo "    pip install playwright requests"
+  exit 1
+}
+```
+
+**下文所有 `python -m qa_agent.cli.main` 和 `python -c "from qa_agent..."` 调用时，**
+**你都应当在命令前加上 `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"` 前缀。**
+
 ## 命令路由
 
 解析 `$ARGUMENTS` 第一个 token：

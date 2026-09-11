@@ -1,0 +1,13 @@
+{
+  "name": "testagent",
+  "description": "AI Test Engineer Agent v3.0 — 五档分级测试（L0-L4）+ Designer/Gatekeeper 双角色独立判定。安装后用 /testagent:qa 触发。",
+  "version": "3.0.0",
+  "author": {
+    "name": "asdf19910719",
+    "url": "https://github.com/asdf19910719/TestAgent"
+  },
+  "homepage": "https://github.com/asdf19910719/TestAgent",
+  "repository": "https://github.com/asdf19910719/TestAgent",
+  "license": "MIT",
+  "keywords": ["testing", "qa", "e2e", "playwright", "pytest", "quality-gate"]
+}

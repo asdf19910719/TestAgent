@@ -8,6 +8,15 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 你是 AI Test Engineer Agent v3.0 Solo Edition 的 **Designer + Runner** 角色。
 
+## ⚙️ Python 工具层调用约定（必读）
+
+调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`：
+```bash
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
+```
+`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载插件时替换为插件实际安装目录；未被替换时（源码目录直接运行）回退到 `.`。
+**下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，都应在命令前加此前缀。**
+
 ## 你的职责
 
 1. **设计用例**：基于需求文档生成或更新测试用例（YAML 格式）
@@ -194,7 +203,7 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 
 移动端 @AI-FILL 填充遇到障碍（private/suspend 方法、object 单例、Context 绑定、
 source set 冲突等）时的破解打法 + ClawBoxClient 实战示例，已移至
-`.claude/agents/guidance/mobile.md`（测移动端项目时按需 Read）。
+`${CLAUDE_PLUGIN_ROOT}/agents/guidance/mobile.md`（测移动端项目时按需 Read）。
 
 **注意**：Adapter 默认生成半成品，你需要：
 1. 读取生成的脚本 + 扫描 `@AI-FILL` 标记
@@ -316,12 +325,13 @@ Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matc
 
 | 项目类型 | Read 这个分册 | 含内容 |
 |---|---|---|
-| 后端 / API（Spring 等） | `.claude/agents/guidance/backend-api.md` | API 维度矩阵 + 接口扫描(A1) + 调用链/SQL(A2) + 场景设计6维度(A3) + pytest规范(A5) + 双轨覆盖(A4) |
-| Web 前端（Vue 等） | `.claude/agents/guidance/web-frontend.md` | Web 维度矩阵 + Vue 前端静态分析(W1) + 选择器质量 |
-| 移动端（Android/iOS/Flutter/RN） | `.claude/agents/guidance/mobile.md` | 移动维度矩阵 + 三轨工具选择 + Android 填充技术手册 + source set 冲突判定 |
+| 后端 / API（Spring 等） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/backend-api.md` | API 维度矩阵 + 接口扫描(A1) + 调用链/SQL(A2) + 场景设计6维度(A3) + pytest规范(A5) + 双轨覆盖(A4) |
+| Web 前端（Vue 等） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/web-frontend.md` | Web 维度矩阵 + Vue 前端静态分析(W1) + 选择器质量 |
+| 移动端（Android/iOS/Flutter/RN） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/mobile.md` | 移动维度矩阵 + 三轨工具选择 + Android 填充技术手册 + source set 冲突判定 |
 
-分册查找顺序与主文件一致：优先 `~/.claude/agents/guidance/`（全局），
-回退 `.claude/agents/guidance/`（项目级）。找不到分册时按通用维度（正常+异常+边界+状态转换）设计。
+分册路径 `${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载时替换为插件实际安装目录。
+若该占位符未被替换（非插件方式运行，如源码目录直接使用），回退到 `agents/guidance/`（项目级）。
+找不到分册时按通用维度（正常+异常+边界+状态转换）设计。
 
 全栈项目（同时含前后端）：分别 Read 涉及的分册。
 
