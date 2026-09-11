@@ -10,12 +10,31 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 ## ⚙️ Python 工具层调用约定（必读）
 
-调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`：
+调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`。本插件**自适应多平台**：
+
 ```bash
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
+# 自适应脚本(首次调用时执行一次)
+if [[ "${CLAUDE_PLUGIN_ROOT}" == *"PLUGIN_ROOT"* ]] || [[ -z "${CLAUDE_PLUGIN_ROOT}" ]]; then
+  # 传统工具(Codex/zcode/项目内 .claude/) - 占位符未替换
+  export PYTHONPATH="."
+  export QA_GUIDANCE_PATH=".claude/agents/guidance"
+else
+  # Claude Code 插件 - 占位符已替换为实际安装目录
+  export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"
+  export QA_GUIDANCE_PATH="${CLAUDE_PLUGIN_ROOT}/agents/guidance"
+fi
+
+# 之后所有调用使用
+python -m qa_agent.cli.main <subcommand> [args...]
 ```
-`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载插件时替换为插件实际安装目录；未被替换时（源码目录直接运行）回退到 `.`。
-**下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，都应在命令前加此前缀。**
+
+**说明**：
+- Claude Code 插件安装：`${CLAUDE_PLUGIN_ROOT}` 被替换成 `~/.claude/plugins/.../3.0.0`
+- 传统工具(Codex/zcode)：占位符保持字面值,使用相对路径 `.`
+- 已 `pip install -e .` 安装：PYTHONPATH 可省略但设了无害
+
+**下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，**
+**都依赖上述自适应脚本设置的 PYTHONPATH。guidance 分册路径用 `$QA_GUIDANCE_PATH`。**
 
 ## 你的职责
 
@@ -203,7 +222,7 @@ Adapter 生成的不是空骨架，而是**半成品 + AI 填充指令**：
 
 移动端 @AI-FILL 填充遇到障碍（private/suspend 方法、object 单例、Context 绑定、
 source set 冲突等）时的破解打法 + ClawBoxClient 实战示例，已移至
-`${CLAUDE_PLUGIN_ROOT}/agents/guidance/mobile.md`（测移动端项目时按需 Read）。
+`${QA_GUIDANCE_PATH}/mobile.md`（测移动端项目时按需 Read，路径由上述自适应脚本设定）。
 
 **注意**：Adapter 默认生成半成品，你需要：
 1. 读取生成的脚本 + 扫描 `@AI-FILL` 标记
@@ -325,13 +344,11 @@ Grep(pattern="<test_id>", path="<automation.file>", output_mode="files_with_matc
 
 | 项目类型 | Read 这个分册 | 含内容 |
 |---|---|---|
-| 后端 / API（Spring 等） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/backend-api.md` | API 维度矩阵 + 接口扫描(A1) + 调用链/SQL(A2) + 场景设计6维度(A3) + pytest规范(A5) + 双轨覆盖(A4) |
-| Web 前端（Vue 等） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/web-frontend.md` | Web 维度矩阵 + Vue 前端静态分析(W1) + 选择器质量 |
-| 移动端（Android/iOS/Flutter/RN） | `${CLAUDE_PLUGIN_ROOT}/agents/guidance/mobile.md` | 移动维度矩阵 + 三轨工具选择 + Android 填充技术手册 + source set 冲突判定 |
+| 后端 / API（Spring 等） | `${QA_GUIDANCE_PATH}/backend-api.md` | API 维度矩阵 + 接口扫描(A1) + 调用链/SQL(A2) + 场景设计6维度(A3) + pytest规范(A5) + 双轨覆盖(A4) |
+| Web 前端（Vue 等） | `${QA_GUIDANCE_PATH}/web-frontend.md` | Web 维度矩阵 + Vue 前端静态分析(W1) + 选择器质量 |
+| 移动端（Android/iOS/Flutter/RN） | `${QA_GUIDANCE_PATH}/mobile.md` | 移动维度矩阵 + 三轨工具选择 + Android 填充技术手册 + source set 冲突判定 |
 
-分册路径 `${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载时替换为插件实际安装目录。
-若该占位符未被替换（非插件方式运行，如源码目录直接使用），回退到 `agents/guidance/`（项目级）。
-找不到分册时按通用维度（正常+异常+边界+状态转换）设计。
+分册路径通过自适应脚本设定的 `$QA_GUIDANCE_PATH` 变量引用（Claude Code 插件为 `${CLAUDE_PLUGIN_ROOT}/agents/guidance`，传统工具为 `agents/guidance`）。找不到分册时按通用维度（正常+异常+边界+状态转换）设计。
 
 全栈项目（同时含前后端）：分别 Read 涉及的分册。
 

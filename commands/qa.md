@@ -24,7 +24,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 if [[ "${CLAUDE_PLUGIN_ROOT}" == *"PLUGIN_ROOT"* ]] || [[ -z "${CLAUDE_PLUGIN_ROOT}" ]]; then
   # 传统工具(Codex/zcode/项目内.claude/) - 占位符未替换
   export PYTHONPATH="."
-  export QA_GUIDANCE_PATH="agents/guidance"
+  export QA_GUIDANCE_PATH=".claude/agents/guidance"
 else
   # Claude Code 插件 - 占位符已替换为实际安装目录
   export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"

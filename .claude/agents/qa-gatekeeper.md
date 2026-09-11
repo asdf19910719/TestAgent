@@ -10,12 +10,29 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 ## ⚙️ Python 工具层调用约定（必读）
 
-调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`：
+调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`。本插件**自适应多平台**：
+
 ```bash
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
+# 自适应脚本(首次调用时执行一次)
+if [[ "${CLAUDE_PLUGIN_ROOT}" == *"PLUGIN_ROOT"* ]] || [[ -z "${CLAUDE_PLUGIN_ROOT}" ]]; then
+  # 传统工具(Codex/zcode/项目内 .claude/) - 占位符未替换
+  export PYTHONPATH="."
+else
+  # Claude Code 插件 - 占位符已替换为实际安装目录
+  export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"
+fi
+
+# 之后所有调用使用
+python -m qa_agent.cli.main <subcommand> [args...]
 ```
-`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载插件时替换为插件实际安装目录；未被替换时（源码目录直接运行）回退到 `.`。
-**下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，都应在命令前加此前缀。**
+
+**说明**：
+- Claude Code 插件安装：`${CLAUDE_PLUGIN_ROOT}` 被替换成 `~/.claude/plugins/.../3.0.0`
+- 传统工具(Codex/zcode)：占位符保持字面值,使用相对路径 `.`
+- 已 `pip install -e .` 安装：PYTHONPATH 可省略但设了无害
+
+**下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，**
+**都依赖上述自适应脚本设置的 PYTHONPATH。**
 
 ## 你的核心职责
 
