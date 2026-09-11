@@ -17,28 +17,16 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 
 ## ⚙️ Python 工具层调用约定（必读）
 
-本插件的 Python 工具层（`qa_agent/` 包）位于项目根目录。**自适应多平台**（Claude Code 插件/Codex/zcode 通用）：
+本插件的 Python 工具层（`qa_agent/` 包）位于插件根目录。调用前必须设置 `PYTHONPATH` 让 Python 找到该模块。
 
+**标准调用模式**（下文所有 `python -m qa_agent.cli.main` 调用都遵循此模式）：
 ```bash
-# 自适应探测(首次调用时执行一次)
-if [[ "${CLAUDE_PLUGIN_ROOT}" == *"PLUGIN_ROOT"* ]] || [[ -z "${CLAUDE_PLUGIN_ROOT}" ]]; then
-  # 传统工具(Codex/zcode/项目内.claude/) - 占位符未替换
-  export PYTHONPATH="."
-  export QA_GUIDANCE_PATH="agents/guidance"
-else
-  # Claude Code 插件 - 占位符已替换为实际安装目录
-  export PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"
-  export QA_GUIDANCE_PATH="${CLAUDE_PLUGIN_ROOT}/agents/guidance"
-fi
-
-# 之后所有 Python 调用使用
-python -m qa_agent.cli.main <subcommand> [args...]
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
 ```
 
-**工作原理**：
-- **Claude Code 插件安装**：`${CLAUDE_PLUGIN_ROOT}` → `~/.claude/plugins/cache/testagent/testagent/3.0.0`
-- **传统工具**(Codex/zcode/项目本地)：占位符保持字面值 → 使用相对路径 `.`
-- **已 pip 安装**(`pip install -e .`)：PYTHONPATH 可省略但设了无害
+**`${CLAUDE_PLUGIN_ROOT}` 说明**：
+- Claude Code 加载插件时自动替换为插件实际安装目录（如 `~/.claude/plugins/.../testagent`）
+- 如果该占位符未被替换（非插件方式运行，如源码目录），使用当前工作目录的父目录或 `.` 作为回退
 
 **首次运行检查**（依赖 `pyyaml` 和 `click`，其他依赖按需）：
 ```bash
@@ -53,7 +41,7 @@ python -c "import yaml, click" 2>/dev/null || {
 ```
 
 **下文所有 `python -m qa_agent.cli.main` 和 `python -c "from qa_agent..."` 调用时，**
-**都依赖上述自适应脚本设置的 PYTHONPATH。guidance 分册路径用 `$QA_GUIDANCE_PATH`。**
+**你都应当在命令前加上 `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"` 前缀。**
 
 ## 命令路由
 
