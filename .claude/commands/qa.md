@@ -17,16 +17,16 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task, Agent
 
 ## ⚙️ Python 工具层调用约定（必读）
 
-本插件的 Python 工具层（`qa_agent/` 包）位于项目根目录。调用前必须设置 `PYTHONPATH` 让 Python 找到该模块。
+本插件的 Python 工具层（`qa_agent/` 包）位于插件根目录。调用前必须设置 `PYTHONPATH` 让 Python 找到该模块。
 
 **标准调用模式**（下文所有 `python -m qa_agent.cli.main` 调用都遵循此模式）：
 ```bash
-PYTHONPATH="." python -m qa_agent.cli.main <subcommand> [args...]
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
 ```
 
-**说明**：
-- `qa_agent` 包在项目根目录，设 `PYTHONPATH="."` 让 Python 从当前目录导入
-- 如果已通过 `pip install -e .` 安装，无需设 PYTHONPATH（但兼容性设了也无害）
+**`${CLAUDE_PLUGIN_ROOT}` 说明**：
+- Claude Code 加载插件时自动替换为插件实际安装目录（如 `~/.claude/plugins/.../testagent`）
+- 如果该占位符未被替换（非插件方式运行，如源码目录），使用当前工作目录的父目录或 `.` 作为回退
 
 **首次运行检查**（依赖 `pyyaml` 和 `click`，其他依赖按需）：
 ```bash
@@ -41,7 +41,7 @@ python -c "import yaml, click" 2>/dev/null || {
 ```
 
 **下文所有 `python -m qa_agent.cli.main` 和 `python -c "from qa_agent..."` 调用时，**
-**你都应当在命令前加上 `PYTHONPATH="."` 前缀（除非已 pip 安装）。**
+**你都应当在命令前加上 `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"` 前缀。**
 
 ## 命令路由
 

@@ -12,9 +12,9 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 调用 Python 工具层（`qa_agent/` 包）时必须设置 `PYTHONPATH`：
 ```bash
-PYTHONPATH="." python -m qa_agent.cli.main <subcommand> [args...]
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}" python -m qa_agent.cli.main <subcommand> [args...]
 ```
-**说明**：`qa_agent` 包在项目根目录，设 `PYTHONPATH="."` 让 Python 从当前目录导入。
+`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在加载插件时替换为插件实际安装目录；未被替换时（源码目录直接运行）回退到 `.`。
 **下文所有 `python -m qa_agent.cli.main` 与 `python -c "from qa_agent..."` 调用，都应在命令前加此前缀。**
 
 ## 你的核心职责
