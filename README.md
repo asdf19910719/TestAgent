@@ -75,47 +75,49 @@ pip install -e .
 
 ## 快速开始
 
-### 一键安装（推荐）
+### 插件安装（推荐）
 
-**Windows PowerShell**：
-```powershell
-cd E:\AIProject\TestAgent
-.\install.ps1 D:\YourProject
+本项目是标准 Claude Code 插件。在任意机器的 Claude Code 里两条命令即可：
+
+```
+/plugin marketplace add asdf19910719/TestAgent
+/plugin install testagent@testagent
 ```
 
-**Linux / macOS / Git Bash**：
+安装后补上 Python 核心依赖（工具层需要）：
+
 ```bash
-cd /path/to/TestAgent
-./install.sh /path/to/YourProject
+pip install pyyaml click
+# 可选（WebUI E2E / API executor 才需要）：
+pip install playwright requests
 ```
 
-脚本自动完成：复制 `.claude/` 扩展、安装 Python 包、初始化项目。
+然后重启 Claude Code，在任意项目里用 `/testagent:qa` 触发：
 
-### 手动安装
-
-如果一键脚本失败，手动步骤：
-
-**1. 复制扩展**：
-```bash
-cp -r .claude /path/to/your/project/
+```
+/testagent:qa status                # 查看覆盖状态
+/testagent:qa feature 登录          # L1 功能级测试
+/testagent:qa release               # L3 发版门
 ```
 
-**2. 安装 Python 包**：
+> 插件机制自带版本管理：作者 bump `plugin.json` 的 `version` 后，用户 `/plugin update testagent` 即可获取更新，无需手工复制文件。
+
+### 备选：源码目录直接使用
+
+克隆仓库后在本项目内开发或调试：
+
 ```bash
+git clone https://github.com/asdf19910719/TestAgent.git
 cd TestAgent
-pip install -e .
+pip install -e .                    # 装工具层（含 CLI 命令 qa）
+claude --plugin-dir .               # 本地加载插件测试
 ```
 
-**3. 初始化项目**：
+首次在目标项目使用需初始化：
+
 ```bash
-cd /path/to/your/project
 qa init   # 自动检测项目类型、框架、需求文档，生成 .qa-agent.yml
-```
-
-**4. 检查配置（可选）**：
-```yaml
-# 编辑 .qa-agent.yml 确认自动检测
-# 特别是 codegraph.mcp_tool_prefixes（默认 mcp__codegraph，本机服务名不同可调整）
+# 可编辑 .qa-agent.yml 确认自动检测，特别是 codegraph.mcp_tool_prefixes
 ```
 
 ### 接入项目

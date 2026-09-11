@@ -1,33 +1,34 @@
 # CLAUDE.md — TestAgent 项目规则
 
-## 全局副本同步规则（强制）
+## 发布规则（插件机制，替代旧的手工 cp 同步）
 
-本项目的 Agent / Command 文件存在**两份副本**：
+本项目已改造为标准 Claude Code 插件。**旧的"改完 cp 到 `~/.claude/agents`、`~/.claude/commands` 全局副本"规则已废弃**——不要再手工复制文件到全局目录。
+
+### 目录约定
 
 | 位置 | 作用 |
 |---|---|
-| `E:\AIProject\TestAgent\.claude\agents\*.md`（含 `agents/guidance/` 子目录） | 项目内副本（git 管理，开发源） |
-| `E:\AIProject\TestAgent\.claude\commands\*.md` | 项目内副本（git 管理，开发源） |
-| `C:\Users\91799\.claude\agents\*.md`（含 `agents/guidance/`） | **全局副本（其他项目实际加载的位置）** |
-| `C:\Users\91799\.claude\commands\*.md` | **全局副本（其他项目实际加载的位置）** |
+| `agents/*.md`（含 `agents/guidance/` 子目录） | 插件 agents（git 管理，唯一开发源） |
+| `commands/qa.md` | 插件 command（安装后为 `/testagent:qa`） |
+| `.claude-plugin/marketplace.json` | 市场清单（仓库根 = 插件根） |
+| `.claude-plugin/plugin.json` | 插件清单（`version` 决定用户何时收到更新） |
+| `qa_agent/` | Python 工具层（在插件根下，靠 `${CLAUDE_PLUGIN_ROOT}` + PYTHONPATH 被导入） |
 
-**关键事实**：StudySkill 等外部项目调用 `/qa` 时，按查找顺序**全局副本优先**。只改项目内副本不会生效。
+### 发布流程
 
-**规则**：每次修改 `.claude/agents/`（含 `guidance/` 分册）或 `.claude/commands/` 下的文件并 `git commit` 后，**必须同步到全局副本**：
+1. 改 `agents/` `commands/` `qa_agent/` 等
+2. 若为对外可见的功能变更，bump `.claude-plugin/plugin.json` 和 `marketplace.json` 里的 `version`
+3. `git commit` + `git push`（远端 https://github.com/asdf19910719/TestAgent）
+4. 外部用户 `/plugin update testagent` 即可获取更新——**无需任何手工同步**
 
-```bash
-# 提交后立即执行
-cp .claude/agents/*.md /c/Users/91799/.claude/agents/
-mkdir -p /c/Users/91799/.claude/agents/guidance        # ⚠️ guidance 分册子目录(非递归 cp 会漏)
-cp .claude/agents/guidance/*.md /c/Users/91799/.claude/agents/guidance/
-cp .claude/commands/*.md /c/Users/91799/.claude/commands/
-# 验证同步成功（对比关键新增内容）
-```
+### 关键约束（改动 agents/commands 时必守）
 
-⚠️ **注意 guidance/ 分册**：qa-test-engineer.md 已按端拆分，会 Read
-`guidance/{backend-api,web-frontend,mobile}.md` 分册。这些分册**也必须同步**，
-否则外部项目加载主文件后 Read 不到分册路径会报错。`cp *.md` 不含子目录，需单独 cp。
+- guidance 分册路径必须用 `${CLAUDE_PLUGIN_ROOT}/agents/guidance/xxx.md`，不能写死 `.claude/` 或 `~/.claude/`（插件安装在 `~/.claude/plugins/cache/...`，写死路径会失效）
+- 任何 `python -m qa_agent.cli.main` / `python -c "from qa_agent..."` 调用，正文里都要带 `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}"` 前缀
+- 本地开发调试：`claude --plugin-dir .` 加载当前目录为插件；`claude plugin validate .` 校验清单
 
-不同步 = 改动对外部项目无效。这是 TestAgent 作为"全局 QA Agent 提供方"的发布步骤，不可省略。
+### 遗留：全局 `~/.claude/` 旧副本清理
 
-注意：全局副本不在本项目 git 仓库内，无法用 git 跟踪，只能靠这条规则保证一致。
+改造前手工 cp 的旧副本可能还在 `C:\Users\91799\.claude\agents\{qa-test-engineer,qa-gatekeeper}.md`、
+`commands\qa.md`（对应 `/qa` 无前缀命令）。这些与插件版（`/testagent:qa`）并存不冲突，
+但已不再维护。确认插件工作正常后可手工删除旧副本，避免 `/qa` 与 `/testagent:qa` 两套并行造成困惑。
